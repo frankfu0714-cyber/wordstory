@@ -239,6 +239,19 @@
     display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
   }
   .story-meta button{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+  .story-lang-toggle{
+    display:inline-flex;gap:0;margin-bottom:10px;
+    background:var(--paper-soft);border:1px solid var(--rule);border-radius:8px;
+    padding:2px;
+  }
+  .lang-pill{
+    cursor:pointer;border:none;background:transparent;color:var(--ink-soft);
+    font-size:12px;font-weight:600;letter-spacing:.4px;
+    padding:5px 14px;border-radius:6px;
+    transition:all .15s ease;
+  }
+  .lang-pill:hover{color:var(--ink)}
+  .lang-pill.sel{background:var(--accent);color:#fff}
 
   /* ---- definition popup ---- */
   .pop-backdrop{
@@ -981,7 +994,10 @@ async function generateStory(){
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || t("genFailed"));
-    lastStory = { text: data.story, vocab };
+    // /api/generate now returns both languages so the user can toggle.
+    // Default the visible language to the target side (the one with vocab).
+    const defaultLang = direction === "en-to-zh" ? "en" : "zh";
+    lastStory = { en: data.story_en, zh: data.story_zh, vocab, lang: defaultLang };
     renderStory();
   } catch (e) {
     console.error(e);
@@ -995,10 +1011,38 @@ async function generateStory(){
 function renderStory(){
   if (!lastStory) return;
   const area = $("storyArea");
+  area.innerHTML = "";
+
+  // EN / 中 toggle. Two pills above the story body. Vocab highlights only
+  // apply when the English version is shown — the Chinese rendering is a
+  // plain reading reference.
+  const toggle = document.createElement("div");
+  toggle.className = "story-lang-toggle";
+  for (const lang of ["en", "zh"]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lang-pill" + (lastStory.lang === lang ? " sel" : "");
+    btn.textContent = lang === "en" ? "EN" : "中";
+    btn.addEventListener("click", () => {
+      if (lastStory.lang === lang) return;
+      lastStory.lang = lang;
+      renderStory();
+    });
+    toggle.appendChild(btn);
+  }
+  area.appendChild(toggle);
+
   const inner = document.createElement("div");
   inner.className = "story-output";
-  inner.innerHTML = highlightStory(lastStory.text, lastStory.vocab);
-  area.innerHTML = "";
+  const activeText = lastStory.lang === "en" ? lastStory.en : lastStory.zh;
+  if (lastStory.lang === "en") {
+    inner.innerHTML = highlightStory(activeText, lastStory.vocab);
+  } else {
+    // Chinese: plain text, paragraph-aware (blank lines → <p>, single \n → <br>).
+    inner.innerHTML = activeText.split(/\n{2,}/).map(block =>
+      "<p>" + block.split(/\n/).map(line => line.trim()).filter(Boolean).join("<br>") + "</p>"
+    ).join("");
+  }
   area.appendChild(inner);
 
   const meta = document.createElement("div");

@@ -54,8 +54,10 @@ const STYLE_ZH = {
 
 function buildPrompt({ words, style, customPrompt, direction }) {
   // direction tells us the TARGET language (the one the user is learning):
-  //   en-to-zh  → vocab is English, story written in English
-  //   zh-to-en  → vocab is Chinese, story written in 繁體中文
+  //   en-to-zh  → vocab is English, primary story written in English
+  //   zh-to-en  → vocab is Chinese, primary story written in 繁體中文
+  // BOTH directions return both story_en AND story_zh so the client can
+  // toggle between them.
   const targetIsEnglish = direction !== "zh-to-en";
   const wordsLine = words.map(w => w.word).join(targetIsEnglish ? ", " : "、");
 
@@ -67,35 +69,30 @@ function buildPrompt({ words, style, customPrompt, direction }) {
     styleInstruction = table[style] || table.short_story;
   }
 
-  if (targetIsEnglish) {
-    return `You are a careful, literary writer helping a Traditional Chinese speaker learn English vocabulary in context.
+  const primaryLang = targetIsEnglish ? "English" : "繁體中文 (Traditional Chinese)";
+  const otherLang   = targetIsEnglish ? "繁體中文 (Traditional Chinese)" : "English";
+  const primaryKey  = targetIsEnglish ? "story_en" : "story_zh";
+  const otherKey    = targetIsEnglish ? "story_zh" : "story_en";
+
+  return `You are a careful, literary writer helping a learner read in context.
 
 TASK
 ${styleInstruction}
 
-VOCABULARY (must use ALL of these, in their natural meaning and grammatical form — inflections allowed but the root must clearly appear)
+VOCABULARY (must appear naturally in the ${primaryLang} version, in their natural meaning and grammatical form — inflections allowed but the root must clearly appear)
 ${wordsLine}
 
 RULES
-- Write in English. Match the requested style and length.
-- Weave every listed word in naturally. If a word does not fit the chosen scenario, gently steer the scenario so it does — do NOT skip the word.
-- Make the surrounding sentence rich enough that the word's meaning is inferable from context.
-- No preamble, no explanation, no "Here is the story", no markdown headings. Output ONLY the piece itself.`;
-  }
+- Write the PRIMARY piece in ${primaryLang}, matching the requested style and length.
+- Weave every vocabulary word in naturally. If a word does not fit, gently steer the scenario so it does — do NOT skip any word.
+- Then provide a faithful ${otherLang} translation of the SAME piece: same scene, same details, same tone — NOT a paraphrase. The translation does not need the vocabulary words verbatim.
+- No preamble, no commentary, no markdown headings. Output ONLY the JSON object below.
 
-  return `你是一位用心的文學作者，正在幫助一位英文母語的學習者透過上下文學習中文詞彙。
-
-任務
-${styleInstruction}
-
-詞彙（必須全部自然運用，使其原意清晰可辨）
-${wordsLine}
-
-規則
-- 以繁體中文寫作。配合所要求的體裁與字數。
-- 必須自然地使用上述每一個詞彙；若某詞不易帶入，請微調情節以納入，不可省略。
-- 周圍句意要足夠豐富，使該詞的意義可從上下文推知。
-- 不要任何開場白、說明、「以下是故事」之類的話，也不要 markdown 標題。只輸出作品本身。`;
+Output JSON:
+{
+  "${primaryKey}": "<the ${primaryLang} piece — primary>",
+  "${otherKey}":   "<the ${otherLang} translation>"
+}`;
 }
 
 export default async function handler(req, res) {
@@ -135,8 +132,10 @@ export default async function handler(req, res) {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.85,
-      maxOutputTokens: 1200,
+      // Bumped to fit both the primary piece + a translation in one response.
+      maxOutputTokens: 2400,
       topP: 0.95,
+      responseMimeType: "application/json",
     },
   };
 
@@ -160,12 +159,33 @@ export default async function handler(req, res) {
 
   const data = await geminiRes.json().catch(() => null);
   const candidate = data?.candidates?.[0];
-  const story = candidate?.content?.parts?.map(p => p.text).join("").trim();
+  const raw = candidate?.content?.parts?.map(p => p.text).join("").trim();
 
-  if (!story) {
-    console.error("Empty Gemini response:", JSON.stringify(data));
+  if (!raw) {
+    console.error("Empty Gemini response:", JSON.stringify(data).slice(0, 200));
     return send(res, 502, { error: "Empty response from generation service" });
   }
 
-  return send(res, 200, { story });
+  // `responseMimeType: application/json` makes Gemini return a JSON string in
+  // the candidate text. Parse it; fall back to a code-fence extract just in
+  // case the model wrapped it.
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+      try { parsed = JSON.parse(fenced[1]); } catch { parsed = null; }
+    }
+  }
+
+  if (!parsed || typeof parsed.story_en !== "string" || typeof parsed.story_zh !== "string") {
+    console.error("Could not parse dual-language response:", raw.slice(0, 200));
+    return send(res, 502, { error: "Generation response could not be parsed" });
+  }
+
+  return send(res, 200, {
+    story_en: parsed.story_en.trim(),
+    story_zh: parsed.story_zh.trim(),
+  });
 }
