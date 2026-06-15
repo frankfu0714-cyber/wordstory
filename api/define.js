@@ -36,24 +36,34 @@ function send(res, status, body) {
 // Direction is en-to-zh (English word, native lang zh) or zh-to-en (Chinese word, native lang en).
 function buildPrompt({ word, direction }) {
   if (direction === "zh-to-en") {
-    return `You are a bilingual dictionary helper. For the Chinese word or phrase below, produce:
-1. A clear English definition in 1–2 sentences. Plain, learner-friendly.
-2. One natural example sentence IN CHINESE (繁體中文 preferred unless the word is clearly simplified-only) that uses the word in context. Aim for a sentence a fluent reader would actually say or write — not a textbook line.
+    return `You are a bilingual dictionary helper. Define the Chinese word "${word}" in English.
+
+Rules for the "definition" field:
+- ONE short phrase only — ideally under 12 words.
+- Plain dictionary-headword style. No examples, no etymology, no usage notes.
+- If a single common-word translation captures it ("貓" → "cat", "高興" → "happy / glad"), use that.
+
+Rules for the "example" field:
+- ONE natural sentence in Chinese (繁體中文 preferred unless the word is clearly simplified-only) using the word in context.
+- What a fluent reader would actually say or write — not a textbook line.
 
 Output ONLY a JSON object on a single line, in this exact shape:
-{"definition":"...","example":"..."}
-
-Word: ${word}`;
+{"definition":"...","example":"..."}`;
   }
   // default: en-to-zh
-  return `You are a bilingual dictionary helper. For the English word or phrase below, produce:
-1. A clear definition in 繁體中文 (Traditional Chinese), 1–2 sentences. Plain, learner-friendly, no Pinyin.
-2. One natural example sentence IN ENGLISH that uses the word in context. Aim for a sentence a fluent speaker would actually say or write — not a textbook line.
+  return `You are a bilingual dictionary helper. Define the English word "${word}" in 繁體中文.
+
+Rules for the "definition" field:
+- ONE short phrase only — ideally under 15 characters.
+- Plain dictionary-headword style. No examples, no etymology, no usage notes, no Pinyin.
+- If a single character or single-word translation captures it ("cat" → "貓", "happy" → "高興"), use that.
+
+Rules for the "example" field:
+- ONE natural sentence in English using the word in context.
+- What a fluent speaker would actually say or write — not a textbook line.
 
 Output ONLY a JSON object on a single line, in this exact shape:
-{"definition":"...","example":"..."}
-
-Word: ${word}`;
+{"definition":"...","example":"..."}`;
 }
 
 function extractJson(text) {
