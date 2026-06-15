@@ -132,8 +132,11 @@ export default async function handler(req, res) {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.85,
-      // Bumped to fit both the primary piece + a translation in one response.
-      maxOutputTokens: 2400,
+      // 4000 tokens — accommodates long stories with many vocab words AND
+      // zh-to-en cases where Chinese characters cost more tokens than English.
+      // 2400 was hitting MAX_TOKENS truncation mid-JSON for ~12-word stories
+      // and most zh-to-en calls, which broke parsing and returned a 502.
+      maxOutputTokens: 4000,
       topP: 0.95,
       responseMimeType: "application/json",
     },
@@ -160,6 +163,7 @@ export default async function handler(req, res) {
   const data = await geminiRes.json().catch(() => null);
   const candidate = data?.candidates?.[0];
   const raw = candidate?.content?.parts?.map(p => p.text).join("").trim();
+  const finishReason = candidate?.finishReason;
 
   if (!raw) {
     console.error("Empty Gemini response:", JSON.stringify(data).slice(0, 200));
@@ -167,25 +171,67 @@ export default async function handler(req, res) {
   }
 
   // `responseMimeType: application/json` makes Gemini return a JSON string in
-  // the candidate text. Parse it; fall back to a code-fence extract just in
-  // case the model wrapped it.
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced) {
-      try { parsed = JSON.parse(fenced[1]); } catch { parsed = null; }
-    }
-  }
+  // the candidate text. Parse it; fall back to a code-fence extract; finally
+  // a forgiving regex pull of the two string fields so a truncated MAX_TOKENS
+  // response can still surface whatever portion was complete.
+  const parsed = parseDualLanguage(raw);
 
-  if (!parsed || typeof parsed.story_en !== "string" || typeof parsed.story_zh !== "string") {
-    console.error("Could not parse dual-language response:", raw.slice(0, 200));
+  if (!parsed) {
+    console.error("Could not parse dual-language response.",
+      "finishReason:", finishReason,
+      "tail:", raw.slice(-80),
+      "head:", raw.slice(0, 120));
     return send(res, 502, { error: "Generation response could not be parsed" });
   }
 
   return send(res, 200, {
-    story_en: parsed.story_en.trim(),
-    story_zh: parsed.story_zh.trim(),
+    story_en: (parsed.story_en || "").trim(),
+    story_zh: (parsed.story_zh || "").trim(),
   });
+}
+
+// Tries strict JSON.parse first, then code-fence extraction, then a forgiving
+// per-field regex that can recover whichever side completed before MAX_TOKENS
+// truncation. Returns an object with at least one non-empty string field on
+// success, or null if neither side could be recovered.
+function parseDualLanguage(raw) {
+  // Strict parse.
+  try {
+    const p = JSON.parse(raw);
+    if (typeof p?.story_en === "string" || typeof p?.story_zh === "string") return p;
+  } catch {
+    // fall through
+  }
+  // Code-fenced JSON.
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    try {
+      const p = JSON.parse(fenced[1]);
+      if (typeof p?.story_en === "string" || typeof p?.story_zh === "string") return p;
+    } catch {
+      // fall through
+    }
+  }
+  // Per-field regex extraction. Tolerates an unclosed object on truncation.
+  // Matches `"story_en": "<string body with escapes>"` allowing the closing
+  // quote to be missing if Gemini ran out of tokens mid-value — we just take
+  // whatever was emitted before the cutoff.
+  const en = extractField(raw, "story_en");
+  const zh = extractField(raw, "story_zh");
+  if (en || zh) return { story_en: en, story_zh: zh };
+  return null;
+}
+
+function extractField(raw, key) {
+  const re = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)`);
+  const m = raw.match(re);
+  if (!m) return "";
+  // Unescape the captured body: \" \\ \n \t \r \/
+  return m[1]
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\r/g, "\r")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\")
+    .replace(/\\\//g, "/");
 }
