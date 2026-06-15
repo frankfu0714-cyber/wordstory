@@ -1,0 +1,10 @@
+{
+  "name": "wordstory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bilingual vocabulary-learning app — AI-generated stories from your saved words.",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#f5efe1" />
+<title>wordstory — vocabulary in context</title>
+<style>
+  :root{
+    --bg:#f5efe1;
+    --paper:#fbf6e8;
+    --paper-soft:#f1e9d5;
+    --ink:#2a2520;
+    --ink-soft:#5a4f44;
+    --ink-quiet:#7a6e60;
+    --accent:#9d4d3e;
+    --accent-soft:#c97b6c;
+    --accent-bg:rgba(157,77,62,0.08);
+    --rule:#e3d8c4;
+    --rule-soft:#ece2cd;
+    --good:#5b7c46;
+    --bad:#a04545;
+    --shadow:0 1px 2px rgba(60,40,20,.04), 0 4px 18px rgba(60,40,20,.06);
+    --serif:"Source Serif Pro","Source Serif 4","Charter",Georgia,"Songti TC","Songti SC","STSong",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue","PingFang TC","PingFang SC",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;min-height:100vh}
+  body{padding-bottom:80px}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  input,textarea,select{font:inherit;color:inherit}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:var(--rule);border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---- header ---- */
+  header{
+    position:sticky;top:0;z-index:20;
+    background:rgba(245,239,225,0.92);backdrop-filter:saturate(1.2) blur(8px);
+    border-bottom:1px solid var(--rule);
+    padding:14px 20px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+  }
+  .brand{font-family:var(--serif);font-size:22px;letter-spacing:-0.01em;font-weight:600;color:var(--ink)}
+  .brand .dot{color:var(--accent)}
+  .lang-toggle{
+    border:1px solid var(--rule);
+    border-radius:999px;
+    padding:5px 12px;
+    font-size:13px;
+    color:var(--ink-soft);
+    background:var(--paper);
+    transition:all .15s ease;
+  }
+  .lang-toggle:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ---- tab bar ---- */
+  .tabs{
+    position:sticky;top:53px;z-index:19;
+    background:var(--bg);
+    border-bottom:1px solid var(--rule);
+    display:flex;
+    padding:0 12px;
+  }
+  .tab{
+    padding:12px 16px;font-size:14px;color:var(--ink-quiet);
+    border-bottom:2px solid transparent;
+    transition:all .15s ease;
+  }
+  .tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .tab .count{
+    display:inline-block;margin-left:6px;font-size:11px;
+    background:var(--rule-soft);color:var(--ink-soft);
+    padding:1px 7px;border-radius:999px;
+  }
+  .tab.active .count{background:var(--accent-bg);color:var(--accent)}
+
+  main{max-width:760px;margin:0 auto;padding:20px}
+  .view{display:none}
+  .view.active{display:block}
+
+  /* ---- common controls ---- */
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .field{
+    width:100%;padding:11px 14px;border:1px solid var(--rule);
+    background:var(--paper);border-radius:10px;font-size:15px;
+    color:var(--ink);
+    transition:border-color .15s ease;
+    -webkit-appearance:none;
+  }
+  .field:focus{outline:none;border-color:var(--accent)}
+  textarea.field{resize:vertical;min-height:80px;font-family:var(--sans);line-height:1.5}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    padding:11px 18px;border-radius:10px;font-size:14px;font-weight:600;
+    background:var(--ink);color:var(--bg);
+    transition:transform .08s ease, opacity .15s ease;
+    white-space:nowrap;
+  }
+  .btn:hover{opacity:.88}
+  .btn:active{transform:scale(.98)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn-accent{background:var(--accent);color:#fff}
+  .btn-ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--rule)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent);opacity:1}
+  .btn-sm{padding:7px 12px;font-size:13px;border-radius:8px}
+
+  .section-label{
+    font-size:11px;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--ink-quiet);margin:18px 0 8px;
+  }
+
+  /* ---- direction pill ---- */
+  .direction-bar{
+    display:flex;align-items:center;gap:10px;
+    background:var(--paper);border:1px solid var(--rule);border-radius:12px;
+    padding:8px 12px;margin-bottom:14px;
+  }
+  .direction-bar .lbl{font-size:12px;color:var(--ink-quiet)}
+  .direction-bar .swap-btn{
+    display:flex;align-items:center;gap:6px;
+    padding:6px 12px;border-radius:8px;background:var(--paper-soft);
+    color:var(--ink);font-size:13px;font-weight:500;
+  }
+  .direction-bar .swap-btn .arrow{color:var(--accent);font-weight:700}
+  .direction-bar .swap-btn:hover{background:var(--accent-bg)}
+
+  /* ---- add row ---- */
+  .add-wrap{display:flex;gap:8px;margin-bottom:8px}
+  .add-wrap .field{flex:1}
+  .paste-toggle{font-size:13px;color:var(--ink-quiet);margin-bottom:14px;display:inline-block}
+  .paste-toggle:hover{color:var(--accent)}
+  .paste-area{display:none;margin-bottom:14px}
+  .paste-area.open{display:block}
+  .paste-area .field{margin-bottom:6px}
+  .paste-area .hint{font-size:12px;color:var(--ink-quiet);margin-bottom:8px}
+
+  /* ---- toolbar ---- */
+  .toolbar{
+    display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;
+  }
+  .toolbar .field{flex:1;min-width:140px;padding:9px 12px;font-size:14px}
+  .toolbar select.field{padding-right:30px;background-image:linear-gradient(45deg,transparent 50%,var(--ink-quiet) 50%),linear-gradient(135deg,var(--ink-quiet) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+
+  /* ---- word list ---- */
+  .word-list{display:flex;flex-direction:column;gap:8px}
+  .word-card{
+    background:var(--paper);border:1px solid var(--rule);
+    border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);
+    transition:border-color .15s ease;
+  }
+  .word-card.learned{opacity:.55;background:var(--paper-soft)}
+  .word-card .top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px}
+  .word-card .word{font-family:var(--serif);font-size:20px;font-weight:600;color:var(--ink);word-break:break-word}
+  .word-card.learned .word{text-decoration:line-through;text-decoration-color:var(--ink-quiet)}
+  .word-card .actions{display:flex;gap:4px;flex-shrink:0}
+  .icon-btn{
+    width:30px;height:30px;border-radius:6px;
+    display:inline-flex;align-items:center;justify-content:center;
+    color:var(--ink-quiet);font-size:14px;
+    transition:all .15s ease;
+  }
+  .icon-btn:hover{background:var(--paper-soft);color:var(--accent)}
+  .icon-btn.learned-on{color:var(--good)}
+  .word-card .def{color:var(--ink-soft);font-size:14px;margin-top:6px}
+  .word-card .ex{
+    font-family:var(--serif);font-style:italic;color:var(--ink-quiet);
+    font-size:14px;margin-top:6px;padding-left:10px;border-left:2px solid var(--rule);
+  }
+  .word-card .loading-row{color:var(--ink-quiet);font-size:13px;display:flex;align-items:center;gap:8px}
+  .spinner{
+    width:12px;height:12px;border:2px solid var(--rule);border-top-color:var(--accent);
+    border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .empty{
+    text-align:center;padding:50px 20px;color:var(--ink-quiet);
+    font-family:var(--serif);font-style:italic;font-size:15px;
+  }
+
+  /* ---- generator ---- */
+  .word-chips{
+    display:flex;flex-wrap:wrap;gap:6px;
+    background:var(--paper);border:1px solid var(--rule);border-radius:12px;
+    padding:12px;margin-bottom:8px;
+    max-height:200px;overflow-y:auto;
+  }
+  .word-chip{
+    padding:6px 12px;border-radius:999px;font-size:13px;
+    background:var(--paper-soft);color:var(--ink-soft);border:1px solid transparent;
+    transition:all .12s ease;
+  }
+  .word-chip:hover{border-color:var(--rule)}
+  .word-chip.selected{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .word-chip.learned-mark{opacity:.5;font-style:italic}
+  .chip-controls{display:flex;gap:8px;font-size:13px;margin-bottom:14px;color:var(--ink-quiet);align-items:center;flex-wrap:wrap}
+  .chip-controls button{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+  .chip-controls .selcount{margin-left:auto;color:var(--ink-quiet)}
+
+  .style-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:14px;
+  }
+  .style-opt{
+    border:1px solid var(--rule);background:var(--paper);
+    border-radius:10px;padding:11px 12px;text-align:left;
+    font-size:13px;color:var(--ink-soft);
+    transition:all .12s ease;
+  }
+  .style-opt:hover{border-color:var(--accent-soft)}
+  .style-opt.selected{border-color:var(--accent);background:var(--accent-bg);color:var(--ink)}
+  .style-opt .name{font-weight:600;color:var(--ink);margin-bottom:2px;font-size:14px}
+
+  #customPrompt{display:none;margin-bottom:14px}
+  #customPrompt.show{display:block}
+
+  .generate-bar{display:flex;gap:8px;margin-bottom:24px;align-items:center}
+  .generate-bar .btn{flex:1;padding:14px 20px;font-size:15px}
+
+  /* ---- story output ---- */
+  .story-output{
+    background:var(--paper);border:1px solid var(--rule);border-radius:14px;
+    padding:28px 26px;box-shadow:var(--shadow);
+    font-family:var(--serif);font-size:18px;line-height:1.85;color:var(--ink);
+  }
+  .story-output p{margin-bottom:1em}
+  .story-output p:last-child{margin-bottom:0}
+  .story-output mark{
+    background:var(--accent-bg);color:var(--accent);
+    padding:0 2px;border-radius:3px;
+    text-decoration:underline;text-decoration-color:var(--accent-soft);
+    text-underline-offset:3px;text-decoration-thickness:1.5px;
+    cursor:pointer;font-weight:500;
+    transition:background .12s ease;
+  }
+  .story-output mark:hover{background:rgba(157,77,62,0.18)}
+  .story-meta{
+    font-size:12px;color:var(--ink-quiet);margin-top:14px;
+    display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  }
+  .story-meta button{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+
+  /* ---- definition popup ---- */
+  .pop-backdrop{
+    display:none;position:fixed;inset:0;background:rgba(40,30,20,0.35);
+    backdrop-filter:blur(2px);z-index:90;
+    align-items:center;justify-content:center;padding:20px;
+  }
+  .pop-backdrop.show{display:flex}
+  .pop-card{
+    background:var(--paper);border:1px solid var(--rule);border-radius:14px;
+    padding:20px 22px;max-width:420px;width:100%;
+    box-shadow:0 12px 40px rgba(40,30,20,0.20);
+  }
+  .pop-card .word{font-family:var(--serif);font-size:24px;font-weight:600;color:var(--ink);margin-bottom:8px;word-break:break-word}
+  .pop-card .def{color:var(--ink-soft);font-size:14.5px;margin-bottom:10px;line-height:1.55}
+  .pop-card .ex{
+    font-family:var(--serif);font-style:italic;color:var(--ink-quiet);
+    font-size:14px;line-height:1.6;padding-left:10px;border-left:2px solid var(--rule);
+  }
+  .pop-close{
+    display:block;margin-top:14px;margin-left:auto;
+    font-size:13px;color:var(--ink-quiet);
+  }
+  .pop-close:hover{color:var(--accent)}
+
+  /* ---- toast ---- */
+  .toast{
+    position:fixed;bottom:20px;left:50%;transform:translate(-50%,20px);
+    background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;
+    font-size:13px;z-index:100;opacity:0;pointer-events:none;
+    transition:all .2s ease;
+    box-shadow:0 8px 24px rgba(40,30,20,0.25);
+    max-width:90vw;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast.bad{background:var(--bad)}
+
+  /* ---- edit modal ---- */
+  .edit-backdrop{
+    display:none;position:fixed;inset:0;background:rgba(40,30,20,0.35);
+    backdrop-filter:blur(2px);z-index:90;
+    align-items:center;justify-content:center;padding:20px;
+  }
+  .edit-backdrop.show{display:flex}
+  .edit-card{
+    background:var(--paper);border:1px solid var(--rule);border-radius:14px;
+    padding:22px;max-width:460px;width:100%;
+    box-shadow:0 12px 40px rgba(40,30,20,0.20);
+  }
+  .edit-card h3{font-family:var(--serif);font-size:20px;margin-bottom:12px}
+  .edit-card .field{margin-bottom:10px}
+  .edit-card label{display:block;font-size:12px;color:var(--ink-quiet);margin-bottom:4px;letter-spacing:0.5px;text-transform:uppercase}
+  .edit-card .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+
+  /* mobile tightening */
+  @media (max-width:520px){
+    main{padding:14px}
+    .story-output{padding:22px 18px;font-size:17px;line-height:1.8}
+    .word-card .word{font-size:18px}
+    .tab{padding:11px 12px;font-size:13px}
+    header{padding:12px 14px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">word<span class="dot">·</span>story</div>
+  <button class="lang-toggle" id="langBtn" type="button">中文</button>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-view="words" type="button">
+    <span data-i18n="tabWords">Words</span><span class="count" id="wordCount">0</span>
+  </button>
+  <button class="tab" data-view="gen" type="button">
+    <span data-i18n="tabGenerator">Story</span>
+  </button>
+</nav>
+
+<main>
+  <!-- ============ WORDS VIEW ============ -->
+  <section class="view active" id="view-words">
+    <div class="direction-bar">
+      <span class="lbl" data-i18n="learning">I'm learning</span>
+      <button class="swap-btn" id="directionBtn" type="button">
+        <span id="directionLeft">English</span>
+        <span class="arrow">→</span>
+        <span id="directionRight">繁體中文</span>
+      </button>
+    </div>
+
+    <div class="add-wrap">
+      <input type="text" class="field" id="addInput" data-i18n-ph="addPlaceholder"
+             autocomplete="off" autocorrect="off" spellcheck="false" />
+      <button class="btn btn-accent" id="addBtn" type="button" data-i18n="addBtn">Add</button>
+    </div>
+    <button class="paste-toggle" id="pasteToggle" type="button">
+      <span data-i18n="pasteToggle">＋ Paste many at once</span>
+    </button>
+    <div class="paste-area" id="pasteArea">
+      <textarea class="field" id="pasteInput" rows="3" data-i18n-ph="pastePlaceholder"></textarea>
+      <div class="hint" data-i18n="pasteHint">One word per line, or separate with commas.</div>
+      <button class="btn btn-sm btn-ghost" id="pasteAddBtn" type="button" data-i18n="pasteAddBtn">Add all</button>
+    </div>
+
+    <div class="toolbar">
+      <input type="text" class="field" id="searchInput" data-i18n-ph="searchPlaceholder" />
+      <select class="field" id="sortSel">
+        <option value="recent" data-i18n="sortRecent">Recently added</option>
+        <option value="alpha" data-i18n="sortAlpha">A–Z</option>
+        <option value="unlearned" data-i18n="sortUnlearned">Unlearned first</option>
+      </select>
+    </div>
+
+    <div class="word-list" id="wordList"></div>
+    <div class="empty" id="wordsEmpty" style="display:none">
+      <span data-i18n="emptyWords">No words yet. Add one above to begin.</span>
+    </div>
+  </section>
+
+  <!-- ============ GENERATOR VIEW ============ -->
+  <section class="view" id="view-gen">
+    <div class="section-label" data-i18n="lblSelectWords">Select words to include</div>
+    <div class="word-chips" id="chips"></div>
+    <div class="chip-controls">
+      <button id="selAllUnlearned" type="button" data-i18n="selAllUnlearned">Select all unlearned</button>
+      <button id="selClear" type="button" data-i18n="selClear">Clear</button>
+      <span class="selcount" id="selCount">0 selected</span>
+    </div>
+
+    <div class="section-label" data-i18n="lblStyle">Style</div>
+    <div class="style-grid" id="styleGrid"></div>
+    <textarea class="field" id="customPrompt" rows="3" data-i18n-ph="customPlaceholder"></textarea>
+
+    <div class="generate-bar">
+      <button class="btn btn-accent" id="generateBtn" type="button">
+        <span data-i18n="generateBtn">Generate</span>
+      </button>
+    </div>
+
+    <div id="storyArea"></div>
+  </section>
+</main>
+
+<!-- definition popup -->
+<div class="pop-backdrop" id="popBackdrop">
+  <div class="pop-card" id="popCard" role="dialog" aria-modal="true">
+    <div class="word" id="popWord"></div>
+    <div class="def" id="popDef"></div>
+    <div class="ex" id="popEx"></div>
+    <button class="pop-close" id="popClose" type="button" data-i18n="close">Close</button>
+  </div>
+</div>
+
+<!-- edit modal -->
+<div class="edit-backdrop" id="editBackdrop">
+  <div class="edit-card">
+    <h3 data-i18n="editTitle">Edit word</h3>
+    <label data-i18n="editWordLbl">Word</label>
+    <input type="text" class="field" id="editWord" />
+    <label data-i18n="editDefLbl">Definition</label>
+    <textarea class="field" id="editDef" rows="2"></textarea>
+    <label data-i18n="editExLbl">Example</label>
+    <textarea class="field" id="editEx" rows="2"></textarea>
+    <div class="btns">
+      <button class="btn btn-ghost btn-sm" id="editCancel" type="button" data-i18n="cancel">Cancel</button>
+      <button class="btn btn-accent btn-sm" id="editSave" type="button" data-i18n="save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   wordstory — vocabulary in context
+   ===================================================================== */
+
+/* ---- i18n ---- */
+const STRINGS = {
+  en: {
+    tabWords: "Words",
+    tabGenerator: "Story",
+    learning: "I'm learning",
+    langEnName: "English",
+    langZhName: "繁體中文",
+    addPlaceholder: "Add a word…",
+    addBtn: "Add",
+    pasteToggle: "＋ Paste many at once",
+    pastePlaceholder: "serendipity\\nubiquitous\\nephemeral",
+    pasteHint: "One word per line, or separate with commas.",
+    pasteAddBtn: "Add all",
+    searchPlaceholder: "Search…",
+    sortRecent: "Recently added",
+    sortAlpha: "A–Z",
+    sortUnlearned: "Unlearned first",
+    emptyWords: "No words yet. Add one above to begin.",
+    lblSelectWords: "Select words to include",
+    selAllUnlearned: "Select all unlearned",
+    selClear: "Clear",
+    selCount: "{n} selected",
+    lblStyle: "Style",
+    customPlaceholder: "Describe your own style…",
+    generateBtn: "Generate",
+    generating: "Writing…",
+    storyMetaWords: "{n} words woven in",
+    regenerate: "Regenerate",
+    close: "Close",
+    fetchingDef: "Looking up…",
+    defFailed: "Couldn't fetch definition — tap to retry",
+    editTitle: "Edit word",
+    editWordLbl: "Word",
+    editDefLbl: "Definition",
+    editExLbl: "Example",
+    cancel: "Cancel",
+    save: "Save",
+    confirmDelete: "Delete this word?",
+    markLearned: "Mark as learned",
+    markUnlearned: "Mark as unlearned",
+    edit: "Edit",
+    delete: "Delete",
+    selectAtLeastOne: "Select at least one word",
+    customNeedsPrompt: "Custom style needs a description",
+    genFailed: "Generation failed",
+    addedN: "Added {n} word{s}",
+    addedOne: "Added “{w}”",
+    duplicate: "“{w}” is already in your list",
+    style_short_story: "Short story",
+    style_short_story_d: "~150 words, one scene",
+    style_news_article: "News article",
+    style_news_article_d: "~200 words, journalistic",
+    style_dialogue: "Dialogue",
+    style_dialogue_d: "Two characters speaking",
+    style_letter: "Letter",
+    style_letter_d: "A warm personal letter",
+    style_poem: "Poem",
+    style_poem_d: "Short, vivid, looser usage",
+    style_custom: "Custom",
+    style_custom_d: "Describe your own style",
+  },
+  zh: {
+    tabWords: "詞彙",
+    tabGenerator: "故事",
+    learning: "我正在學",
+    langEnName: "English",
+    langZhName: "繁體中文",
+    addPlaceholder: "加入一個詞…",
+    addBtn: "加入",
+    pasteToggle: "＋ 一次貼上多個",
+    pastePlaceholder: "曖昧\\n婉約\\n躊躇",
+    pasteHint: "一行一個詞，或以逗號分隔。",
+    pasteAddBtn: "全部加入",
+    searchPlaceholder: "搜尋…",
+    sortRecent: "最近加入",
+    sortAlpha: "字母序",
+    sortUnlearned: "未學會的優先",
+    emptyWords: "還沒有詞彙。先在上面加一個吧。",
+    lblSelectWords: "選擇要用到的詞",
+    selAllUnlearned: "選擇所有未學會的",
+    selClear: "全部清除",
+    selCount: "已選 {n} 個",
+    lblStyle: "體裁",
+    customPlaceholder: "描述你想要的風格…",
+    generateBtn: "生成",
+    generating: "撰寫中…",
+    storyMetaWords: "已織入 {n} 個詞彙",
+    regenerate: "重新生成",
+    close: "關閉",
+    fetchingDef: "查詢中…",
+    defFailed: "查詢失敗 — 點此重試",
+    editTitle: "編輯詞彙",
+    editWordLbl: "詞彙",
+    editDefLbl: "釋義",
+    editExLbl: "例句",
+    cancel: "取消",
+    save: "儲存",
+    confirmDelete: "確定刪除此詞？",
+    markLearned: "標記為已學會",
+    markUnlearned: "標記為未學會",
+    edit: "編輯",
+    delete: "刪除",
+    selectAtLeastOne: "請至少選一個詞",
+    customNeedsPrompt: "自訂風格需要一段描述",
+    genFailed: "生成失敗",
+    addedN: "已加入 {n} 個詞",
+    addedOne: "已加入「{w}」",
+    duplicate: "「{w}」已在你的清單中",
+    style_short_story: "短篇故事",
+    style_short_story_d: "約 150 字，單一場景",
+    style_news_article: "新聞報導",
+    style_news_article_d: "約 200 字，新聞語氣",
+    style_dialogue: "對話",
+    style_dialogue_d: "兩位角色的對話",
+    style_letter: "書信",
+    style_letter_d: "一封親切的信",
+    style_poem: "詩",
+    style_poem_d: "短小、生動、可隱喻",
+    style_custom: "自訂",
+    style_custom_d: "自行描述風格",
+  },
+};
+const STYLES = ["short_story","news_article","dialogue","letter","poem","custom"];
+
+/* ---- state ---- */
+const LS_WORDS = "wordstory.words";
+const LS_LANG = "wordstory.lang";
+const LS_DIR = "wordstory.direction";
+
+let lang = loadLang();
+let direction = loadDirection();
+let words = loadWords();
+let selectedIds = new Set();
+let selectedStyle = "short_story";
+let currentView = "words";
+let editingId = null;
+let lastStory = null;
+
+function loadLang(){
+  const v = localStorage.getItem(LS_LANG);
+  if (v === "en" || v === "zh") return v;
+  return (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+function loadDirection(){
+  const v = localStorage.getItem(LS_DIR);
+  if (v === "en-to-zh" || v === "zh-to-en") return v;
+  return "en-to-zh";
+}
+function loadWords(){
+  try { return JSON.parse(localStorage.getItem(LS_WORDS) || "[]"); }
+  catch { return []; }
+}
+function saveWords(){
+  try { localStorage.setItem(LS_WORDS, JSON.stringify(words)); }
+  catch(e){ console.warn("localStorage write failed", e); }
+}
+
+function t(key, vars){
+  let s = (STRINGS[lang] && STRINGS[lang][key]) || (STRINGS.en[key] || key);
+  if (vars) {
+    for (const k in vars) s = s.replaceAll("{" + k + "}", String(vars[k]));
+  }
+  return s;
+}
+
+/* ---- DOM helpers ---- */
+const $ = (id) => document.getElementById(id);
+
+function applyI18n(){
+  document.documentElement.lang = lang === "zh" ? "zh-Hant" : "en";
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    if (key) el.textContent = t(key);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+    const key = el.getAttribute("data-i18n-ph");
+    if (key) el.placeholder = t(key).replace(/\\n/g, "\n");
+  });
+  $("langBtn").textContent = lang === "zh" ? "EN" : "中文";
+  renderDirection();
+  renderStyleGrid();
+  renderWords();
+  renderChips();
+  updateGenerateBtn();
+}
+
+function renderDirection(){
+  // direction = the TARGET language → the NATIVE language
+  // en-to-zh: target=English, native=繁體中文 → bar reads "English → 繁體中文"
+  if (direction === "en-to-zh") {
+    $("directionLeft").textContent = "English";
+    $("directionRight").textContent = "繁體中文";
+  } else {
+    $("directionLeft").textContent = "繁體中文";
+    $("directionRight").textContent = "English";
+  }
+}
+
+function renderStyleGrid(){
+  const grid = $("styleGrid");
+  grid.innerHTML = "";
+  for (const s of STYLES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "style-opt" + (s === selectedStyle ? " selected" : "");
+    btn.dataset.style = s;
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = t("style_" + s);
+    const desc = document.createElement("div");
+    desc.textContent = t("style_" + s + "_d");
+    btn.append(name, desc);
+    btn.addEventListener("click", () => {
+      selectedStyle = s;
+      renderStyleGrid();
+      $("customPrompt").classList.toggle("show", s === "custom");
+    });
+    grid.appendChild(btn);
+  }
+  $("customPrompt").classList.toggle("show", selectedStyle === "custom");
+}
+
+/* ---- words rendering ---- */
+function renderWords(){
+  const list = $("wordList");
+  const empty = $("wordsEmpty");
+  const q = ($("searchInput").value || "").trim().toLowerCase();
+  const sort = $("sortSel").value;
+
+  let view = words.slice();
+  if (q) view = view.filter(w => (w.word + " " + (w.definition||"") + " " + (w.example||"")).toLowerCase().includes(q));
+  if (sort === "alpha") view.sort((a,b) => a.word.localeCompare(b.word));
+  else if (sort === "unlearned") view.sort((a,b) => (a.learned?1:0) - (b.learned?1:0) || b.addedAt - a.addedAt);
+  else view.sort((a,b) => b.addedAt - a.addedAt);
+
+  $("wordCount").textContent = String(words.length);
+  list.innerHTML = "";
+
+  if (view.length === 0) {
+    empty.style.display = words.length === 0 ? "block" : "none";
+    if (words.length > 0) {
+      empty.style.display = "block";
+      empty.querySelector("[data-i18n='emptyWords']").textContent =
+        lang === "zh" ? "找不到符合的詞彙。" : "No matching words.";
+    } else {
+      empty.querySelector("[data-i18n='emptyWords']").textContent = t("emptyWords");
+    }
+    return;
+  }
+  empty.style.display = "none";
+
+  for (const w of view) {
+    list.appendChild(buildWordCard(w));
+  }
+}
+
+function buildWordCard(w){
+  const card = document.createElement("div");
+  card.className = "word-card" + (w.learned ? " learned" : "");
+  card.dataset.id = w.id;
+
+  const top = document.createElement("div");
+  top.className = "top";
+  const wordEl = document.createElement("div");
+  wordEl.className = "word";
+  wordEl.textContent = w.word;
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  const learnBtn = document.createElement("button");
+  learnBtn.type = "button";
+  learnBtn.className = "icon-btn" + (w.learned ? " learned-on" : "");
+  learnBtn.title = w.learned ? t("markUnlearned") : t("markLearned");
+  learnBtn.textContent = w.learned ? "✓" : "○";
+  learnBtn.addEventListener("click", () => toggleLearned(w.id));
+
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "icon-btn";
+  editBtn.title = t("edit");
+  editBtn.textContent = "✎";
+  editBtn.addEventListener("click", () => openEdit(w.id));
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "icon-btn";
+  delBtn.title = t("delete");
+  delBtn.textContent = "×";
+  delBtn.addEventListener("click", () => deleteWord(w.id));
+
+  actions.append(learnBtn, editBtn, delBtn);
+  top.append(wordEl, actions);
+  card.appendChild(top);
+
+  if (w.loading) {
+    const row = document.createElement("div");
+    row.className = "loading-row";
+    const sp = document.createElement("span");
+    sp.className = "spinner";
+    const txt = document.createElement("span");
+    txt.textContent = t("fetchingDef");
+    row.append(sp, txt);
+    card.appendChild(row);
+  } else if (w.error) {
+    const row = document.createElement("div");
+    row.className = "loading-row";
+    row.style.cursor = "pointer";
+    row.style.color = "var(--bad)";
+    row.textContent = t("defFailed");
+    row.addEventListener("click", () => fetchDefinitionFor(w.id));
+    card.appendChild(row);
+  } else {
+    if (w.definition) {
+      const def = document.createElement("div");
+      def.className = "def";
+      def.textContent = w.definition;
+      card.appendChild(def);
+    }
+    if (w.example) {
+      const ex = document.createElement("div");
+      ex.className = "ex";
+      ex.textContent = w.example;
+      card.appendChild(ex);
+    }
+  }
+  return card;
+}
+
+function renderChips(){
+  const cont = $("chips");
+  cont.innerHTML = "";
+  if (words.length === 0) {
+    const e = document.createElement("div");
+    e.style.cssText = "color:var(--ink-quiet);font-size:13px;padding:4px";
+    e.textContent = lang === "zh" ? "請先加入一些詞彙。" : "Add some words first.";
+    cont.appendChild(e);
+    updateSelCount();
+    return;
+  }
+  // chips sorted by added recency
+  const list = words.slice().sort((a,b) => b.addedAt - a.addedAt);
+  for (const w of list) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "word-chip" + (selectedIds.has(w.id) ? " selected" : "") + (w.learned ? " learned-mark" : "");
+    chip.textContent = w.word;
+    chip.dataset.id = w.id;
+    chip.addEventListener("click", () => {
+      if (selectedIds.has(w.id)) selectedIds.delete(w.id);
+      else selectedIds.add(w.id);
+      renderChips();
+      updateGenerateBtn();
+    });
+    cont.appendChild(chip);
+  }
+  updateSelCount();
+}
+
+function updateSelCount(){
+  $("selCount").textContent = t("selCount", { n: selectedIds.size });
+}
+function updateGenerateBtn(){
+  const btn = $("generateBtn");
+  const span = btn.querySelector("span");
+  span.textContent = t("generateBtn");
+  btn.disabled = selectedIds.size === 0;
+}
+
+/* ---- word CRUD ---- */
+function normalize(w){ return w.trim(); }
+function exists(word){
+  const norm = word.trim().toLowerCase();
+  return words.some(w => w.word.toLowerCase() === norm);
+}
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+async function addWord(rawWord, { silent } = {}){
+  const word = normalize(rawWord);
+  if (!word) return null;
+  if (exists(word)) {
+    if (!silent) toast(t("duplicate", { w: word }), true);
+    return null;
+  }
+  const item = {
+    id: uid(),
+    word,
+    definition: "",
+    example: "",
+    learned: false,
+    direction,
+    addedAt: Date.now(),
+    loading: true,
+    error: false,
+  };
+  words.push(item);
+  saveWords();
+  renderWords();
+  renderChips();
+  fetchDefinitionFor(item.id);
+  if (!silent) toast(t("addedOne", { w: word }));
+  return item;
+}
+
+async function fetchDefinitionFor(id){
+  const w = words.find(x => x.id === id);
+  if (!w) return;
+  w.loading = true; w.error = false;
+  saveWords(); renderWords();
+  try {
+    const res = await fetch("/api/define", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word: w.word, direction: w.direction || direction }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "request failed");
+    w.definition = data.definition || "";
+    w.example = data.example || "";
+    w.loading = false;
+    w.error = false;
+  } catch (e) {
+    console.error(e);
+    w.loading = false;
+    w.error = true;
+  }
+  saveWords();
+  renderWords();
+}
+
+function toggleLearned(id){
+  const w = words.find(x => x.id === id);
+  if (!w) return;
+  w.learned = !w.learned;
+  saveWords();
+  renderWords();
+  renderChips();
+}
+
+function deleteWord(id){
+  if (!confirm(t("confirmDelete"))) return;
+  words = words.filter(x => x.id !== id);
+  selectedIds.delete(id);
+  saveWords();
+  renderWords();
+  renderChips();
+  updateGenerateBtn();
+}
+
+function openEdit(id){
+  const w = words.find(x => x.id === id);
+  if (!w) return;
+  editingId = id;
+  $("editWord").value = w.word;
+  $("editDef").value = w.definition || "";
+  $("editEx").value = w.example || "";
+  $("editBackdrop").classList.add("show");
+}
+function closeEdit(){
+  editingId = null;
+  $("editBackdrop").classList.remove("show");
+}
+function saveEdit(){
+  if (!editingId) return;
+  const w = words.find(x => x.id === editingId);
+  if (!w) { closeEdit(); return; }
+  w.word = $("editWord").value.trim() || w.word;
+  w.definition = $("editDef").value.trim();
+  w.example = $("editEx").value.trim();
+  w.error = false;
+  saveWords();
+  renderWords();
+  renderChips();
+  closeEdit();
+}
+
+/* ---- story generation + highlight ---- */
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
+}
+function escapeRegex(s){
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function containsCJK(s){ return /[㐀-鿿豈-﫿]/.test(s); }
+
+function highlightStory(story, vocab){
+  // vocab is the array of selected word objects
+  // For each word, wrap matches in <mark data-id="...">…</mark>
+  // English words use word-boundary matching; CJK uses raw substring.
+  // We escape HTML first, then weave marks in via index walking to avoid
+  // double-substitution conflicts.
+
+  let html = escapeHtml(story);
+
+  // Build matchers, longest first so "self-esteem" wins over "self".
+  const matchers = vocab.slice().sort((a,b) => b.word.length - a.word.length).map(w => {
+    const escaped = escapeRegex(escapeHtml(w.word));
+    const re = containsCJK(w.word)
+      ? new RegExp(escaped, "g")
+      : new RegExp("\\b" + escaped + "(?:[a-zA-Z]{0,4})?\\b", "gi");
+    return { w, re };
+  });
+
+  // Sentinels in the Unicode Private Use Area so they can't collide with real text.
+  // Wrap each match as: OPEN + id + SEP + matchedText + CLOSE.
+  // Subsequent (shorter) matchers split on existing wraps and only run the regex
+  // on unwrapped segments, so longest-first ordering is preserved.
+  const OPEN = "\uE000", SEP = "\uE001", CLOSE = "\uE002";
+  const splitRe = new RegExp(OPEN + "[^" + CLOSE + "]*" + CLOSE, "g");
+  for (const { w, re } of matchers) {
+    const parts = [];
+    let lastIdx = 0, m;
+    while ((m = splitRe.exec(html)) !== null) {
+      parts.push(html.slice(lastIdx, m.index));
+      parts.push(m[0]);
+      lastIdx = splitRe.lastIndex;
+    }
+    parts.push(html.slice(lastIdx));
+    for (let i = 0; i < parts.length; i += 2) {
+      parts[i] = parts[i].replace(re, (match) => OPEN + w.id + SEP + match + CLOSE);
+    }
+    html = parts.join("");
+    splitRe.lastIndex = 0;
+  }
+  // Convert sentinels to <mark> elements.
+  html = html.replace(
+    new RegExp(OPEN + "([^" + SEP + "]+)" + SEP + "([^" + CLOSE + "]+)" + CLOSE, "g"),
+    (_, id, txt) => `<mark data-id="${id}">${txt}</mark>`
+  );
+
+  // Newlines → paragraphs (split on blank-line, preserve single newlines as <br> for poems/dialogue)
+  const paragraphs = html.split(/\n{2,}/).map(block =>
+    "<p>" + block.split(/\n/).map(line => line.trim()).filter(Boolean).join("<br>") + "</p>"
+  ).join("");
+  return paragraphs;
+}
+
+async function generateStory(){
+  if (selectedIds.size === 0) { toast(t("selectAtLeastOne"), true); return; }
+  const vocab = words.filter(w => selectedIds.has(w.id));
+  if (selectedStyle === "custom" && !$("customPrompt").value.trim()) {
+    toast(t("customNeedsPrompt"), true); return;
+  }
+
+  const btn = $("generateBtn");
+  const span = btn.querySelector("span");
+  const original = span.textContent;
+  btn.disabled = true;
+  span.textContent = t("generating");
+  $("storyArea").innerHTML = "";
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        words: vocab.map(w => ({ word: w.word })),
+        style: selectedStyle,
+        customPrompt: $("customPrompt").value.trim(),
+        direction,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || t("genFailed"));
+    lastStory = { text: data.story, vocab };
+    renderStory();
+  } catch (e) {
+    console.error(e);
+    toast(e.message || t("genFailed"), true);
+  } finally {
+    btn.disabled = selectedIds.size === 0;
+    span.textContent = t("generateBtn");
+  }
+}
+
+function renderStory(){
+  if (!lastStory) return;
+  const area = $("storyArea");
+  const inner = document.createElement("div");
+  inner.className = "story-output";
+  inner.innerHTML = highlightStory(lastStory.text, lastStory.vocab);
+  area.innerHTML = "";
+  area.appendChild(inner);
+
+  const meta = document.createElement("div");
+  meta.className = "story-meta";
+  const wleft = document.createElement("span");
+  wleft.textContent = t("storyMetaWords", { n: lastStory.vocab.length });
+  const wright = document.createElement("button");
+  wright.type = "button";
+  wright.textContent = t("regenerate");
+  wright.addEventListener("click", () => generateStory());
+  meta.append(wleft, wright);
+  area.appendChild(meta);
+
+  // mark click handlers
+  inner.querySelectorAll("mark").forEach(m => {
+    m.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const id = m.dataset.id;
+      const w = words.find(x => x.id === id);
+      if (w) openPopup(w);
+    });
+  });
+}
+
+function openPopup(w){
+  $("popWord").textContent = w.word;
+  $("popDef").textContent = w.definition || (lang === "zh" ? "（尚無釋義）" : "(no definition yet)");
+  $("popEx").textContent = w.example || "";
+  $("popEx").style.display = w.example ? "" : "none";
+  $("popBackdrop").classList.add("show");
+}
+function closePopup(){ $("popBackdrop").classList.remove("show"); }
+
+/* ---- toast ---- */
+let toastT;
+function toast(msg, bad){
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.toggle("bad", !!bad);
+  el.classList.add("show");
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove("show"), 2400);
+}
+
+/* ---- view switching ---- */
+function setView(v){
+  currentView = v;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
+  document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
+  window.scrollTo({ top: 0, behavior: "instant" });
+  if (v === "gen") renderChips();
+}
+
+/* ---- wiring ---- */
+function init(){
+  applyI18n();
+  renderStyleGrid();
+
+  $("langBtn").addEventListener("click", () => {
+    lang = lang === "en" ? "zh" : "en";
+    localStorage.setItem(LS_LANG, lang);
+    applyI18n();
+  });
+  $("directionBtn").addEventListener("click", () => {
+    direction = direction === "en-to-zh" ? "zh-to-en" : "en-to-zh";
+    localStorage.setItem(LS_DIR, direction);
+    renderDirection();
+  });
+  document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+
+  $("addBtn").addEventListener("click", () => {
+    const v = $("addInput").value;
+    if (!v.trim()) return;
+    addWord(v);
+    $("addInput").value = "";
+  });
+  $("addInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); $("addBtn").click(); }
+  });
+  $("pasteToggle").addEventListener("click", () => $("pasteArea").classList.toggle("open"));
+  $("pasteAddBtn").addEventListener("click", () => {
+    const raw = $("pasteInput").value;
+    const parts = raw.split(/[\n,，、;；]+/).map(s => s.trim()).filter(Boolean);
+    let added = 0;
+    for (const p of parts) {
+      const r = addWord(p, { silent: true });
+      // addWord returns null on duplicate; await isn't strictly needed
+      // since we're not chaining on the result, but kicking off all fetches.
+      if (r) added++;
+    }
+    if (added > 0) {
+      $("pasteInput").value = "";
+      toast(t("addedN", { n: added, s: added === 1 ? "" : "s" }));
+    }
+  });
+
+  $("searchInput").addEventListener("input", () => renderWords());
+  $("sortSel").addEventListener("change", () => renderWords());
+
+  $("selAllUnlearned").addEventListener("click", () => {
+    for (const w of words) if (!w.learned) selectedIds.add(w.id);
+    renderChips();
+    updateGenerateBtn();
+  });
+  $("selClear").addEventListener("click", () => {
+    selectedIds.clear();
+    renderChips();
+    updateGenerateBtn();
+  });
+  $("generateBtn").addEventListener("click", () => generateStory());
+
+  $("popBackdrop").addEventListener("click", (e) => { if (e.target === $("popBackdrop")) closePopup(); });
+  $("popClose").addEventListener("click", closePopup);
+
+  $("editBackdrop").addEventListener("click", (e) => { if (e.target === $("editBackdrop")) closeEdit(); });
+  $("editCancel").addEventListener("click", closeEdit);
+  $("editSave").addEventListener("click", saveEdit);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closePopup(); closeEdit(); }
+  });
+
+  renderWords();
+  renderChips();
+  updateGenerateBtn();
+}
+
+init();
+</script>
+</body>
+</html>
