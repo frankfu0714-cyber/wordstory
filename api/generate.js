@@ -71,8 +71,6 @@ function buildPrompt({ words, style, customPrompt, direction }) {
 
   const primaryLang = targetIsEnglish ? "English" : "繁體中文 (Traditional Chinese)";
   const otherLang   = targetIsEnglish ? "繁體中文 (Traditional Chinese)" : "English";
-  const primaryKey  = targetIsEnglish ? "story_en" : "story_zh";
-  const otherKey    = targetIsEnglish ? "story_zh" : "story_en";
 
   return `You are a careful, literary writer helping a learner read in context.
 
@@ -82,16 +80,27 @@ ${styleInstruction}
 VOCABULARY (must appear naturally in the ${primaryLang} version, in their natural meaning and grammatical form — inflections allowed but the root must clearly appear)
 ${wordsLine}
 
+PROCESS
+1. Write the PRIMARY piece in ${primaryLang}, matching the requested style and length, weaving every vocabulary word in naturally.
+2. Break it into sentence-pair objects, ONE sentence per pair. Each pair has:
+   - "en": the English sentence
+   - "zh": the matching Traditional Chinese sentence
+   Regardless of primary direction, ALWAYS use the keys "en" (for the English form) and "zh" (for the Traditional Chinese form).
+3. Provide the full concatenated story in both languages for convenience as "story_en" and "story_zh".
+
 RULES
-- Write the PRIMARY piece in ${primaryLang}, matching the requested style and length.
-- Weave every vocabulary word in naturally. If a word does not fit, gently steer the scenario so it does — do NOT skip any word.
-- Then provide a faithful ${otherLang} translation of the SAME piece: same scene, same details, same tone — NOT a paraphrase. The translation does not need the vocabulary words verbatim.
+- Each pair must contain EXACTLY one sentence on each side — never combine two English sentences into one pair, never split one sentence across two pairs.
+- The translation must convey the same meaning, scene, and tone — not a paraphrase. The translation does not need the vocabulary words verbatim.
 - No preamble, no commentary, no markdown headings. Output ONLY the JSON object below.
 
-Output JSON:
+Output JSON shape:
 {
-  "${primaryKey}": "<the ${primaryLang} piece — primary>",
-  "${otherKey}":   "<the ${otherLang} translation>"
+  "sentences": [
+    {"en": "<one English sentence>", "zh": "<matching Traditional Chinese sentence>"},
+    {"en": "...", "zh": "..."}
+  ],
+  "story_en": "<full English version, sentences concatenated with spaces>",
+  "story_zh": "<full Traditional Chinese version, sentences concatenated>"
 }`;
 }
 
@@ -132,11 +141,12 @@ export default async function handler(req, res) {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.85,
-      // 4000 tokens — accommodates long stories with many vocab words AND
-      // zh-to-en cases where Chinese characters cost more tokens than English.
-      // 2400 was hitting MAX_TOKENS truncation mid-JSON for ~12-word stories
-      // and most zh-to-en calls, which broke parsing and returned a 502.
-      maxOutputTokens: 4000,
+      // 5000 tokens — sentence-pair structure has more JSON overhead than the
+      // flat dual-string response, plus we keep the full concatenated stories
+      // alongside. Previous bumps: 1200 → 2400 → 4000. 5000 has comfortably
+      // covered every smoke test so far including 12-word vocab lists and
+      // zh-to-en (where Chinese characters cost more tokens).
+      maxOutputTokens: 5000,
       topP: 0.95,
       responseMimeType: "application/json",
     },
@@ -172,9 +182,11 @@ export default async function handler(req, res) {
 
   // `responseMimeType: application/json` makes Gemini return a JSON string in
   // the candidate text. Parse it; fall back to a code-fence extract; finally
-  // a forgiving regex pull of the two string fields so a truncated MAX_TOKENS
-  // response can still surface whatever portion was complete.
-  const parsed = parseDualLanguage(raw);
+  // a forgiving regex pull of the flat story_en / story_zh fields so a
+  // truncated MAX_TOKENS response can still surface whatever portion was
+  // complete (the sentences[] array may be lost on truncation, but the
+  // legacy flat strings give the client something to render).
+  const parsed = parseStoryResponse(raw);
 
   if (!parsed) {
     console.error("Could not parse dual-language response.",
@@ -184,21 +196,30 @@ export default async function handler(req, res) {
     return send(res, 502, { error: "Generation response could not be parsed" });
   }
 
+  // Filter the sentences array to only well-formed {en, zh} pairs.
+  const sentences = Array.isArray(parsed.sentences)
+    ? parsed.sentences
+        .filter(p => p && typeof p.en === "string" && typeof p.zh === "string")
+        .map(p => ({ en: p.en.trim(), zh: p.zh.trim() }))
+        .filter(p => p.en.length > 0 || p.zh.length > 0)
+    : [];
+
   return send(res, 200, {
+    sentences,
     story_en: (parsed.story_en || "").trim(),
     story_zh: (parsed.story_zh || "").trim(),
   });
 }
 
 // Tries strict JSON.parse first, then code-fence extraction, then a forgiving
-// per-field regex that can recover whichever side completed before MAX_TOKENS
-// truncation. Returns an object with at least one non-empty string field on
-// success, or null if neither side could be recovered.
-function parseDualLanguage(raw) {
+// per-field regex that can recover whichever pieces completed before
+// MAX_TOKENS truncation. Returns an object with at least one of {sentences,
+// story_en, story_zh} populated, or null if nothing could be recovered.
+function parseStoryResponse(raw) {
   // Strict parse.
   try {
     const p = JSON.parse(raw);
-    if (typeof p?.story_en === "string" || typeof p?.story_zh === "string") return p;
+    if (hasValidStructure(p)) return p;
   } catch {
     // fall through
   }
@@ -207,19 +228,25 @@ function parseDualLanguage(raw) {
   if (fenced) {
     try {
       const p = JSON.parse(fenced[1]);
-      if (typeof p?.story_en === "string" || typeof p?.story_zh === "string") return p;
+      if (hasValidStructure(p)) return p;
     } catch {
       // fall through
     }
   }
-  // Per-field regex extraction. Tolerates an unclosed object on truncation.
-  // Matches `"story_en": "<string body with escapes>"` allowing the closing
-  // quote to be missing if Gemini ran out of tokens mid-value — we just take
-  // whatever was emitted before the cutoff.
+  // Per-field regex extraction for the two flat-string fields. If sentences
+  // were partially emitted, we lose them on truncation — but the flat
+  // story_en / story_zh fields, which Gemini emits LAST per the prompt
+  // template, still give us something useful when they made it through.
   const en = extractField(raw, "story_en");
   const zh = extractField(raw, "story_zh");
-  if (en || zh) return { story_en: en, story_zh: zh };
+  if (en || zh) return { sentences: [], story_en: en, story_zh: zh };
   return null;
+}
+
+function hasValidStructure(p) {
+  return Array.isArray(p?.sentences)
+      || typeof p?.story_en === "string"
+      || typeof p?.story_zh === "string";
 }
 
 function extractField(raw, key) {
