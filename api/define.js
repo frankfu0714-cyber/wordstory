@@ -1,18 +1,11 @@
-// Vercel serverless function — looks up a single-phrase definition for a word
-// via the free MyMemory Translation API. No API key required for ≤10K
-// words/day per IP, which is well above personal use.
-//
-// Endpoint contract is unchanged from the previous Gemini-backed version so
-// the iOS app and the web app don't need any changes:
-//   POST { word, direction: "en-to-zh" | "zh-to-en" }
-//   200  { word, definition, example }     // example is "" with MyMemory
-//
-// Gemini stays in place for /api/generate — the story feature is where AI
-// value justifies the cost. Definitions are mundane and should be free.
+// Vercel serverless function — ask Gemini for a 1–2 sentence definition + a
+// natural example sentence for a single word. Definition is returned in the
+// user's native language; the example sentence stays in the target language.
 
-const ENDPOINT = "https://api.mymemory.translated.net/get";
+const MODEL = "gemini-2.5-flash";
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const WINDOW_SECONDS = 3600;
-const MAX_REQUESTS = 80;
+const MAX_REQUESTS = 80; // single-word lookups; users will hit this more than story-gen
 const MAX_WORD_CHARS = 80;
 
 const memoryBuckets = new Map();
@@ -40,14 +33,58 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function langpairFor(direction) {
-  // MyMemory uses BCP-47-ish pair strings separated by `|`.
-  // We standardise on zh-TW so traditional-character translations are preferred.
-  return direction === "zh-to-en" ? "zh-TW|en" : "en|zh-TW";
+// Direction is en-to-zh (English word, native lang zh) or zh-to-en (Chinese word, native lang en).
+function buildPrompt({ word, direction }) {
+  if (direction === "zh-to-en") {
+    return `You are a bilingual dictionary helper. Define the Chinese word "${word}" in English.
+
+Rules for the "definition" field:
+- ONE short phrase only — ideally under 12 words.
+- Plain dictionary-headword style. No examples, no etymology, no usage notes.
+- If a single common-word translation captures it ("貓" → "cat", "高興" → "happy / glad"), use that.
+
+Rules for the "example" field:
+- ONE natural sentence in Chinese (繁體中文 preferred unless the word is clearly simplified-only) using the word in context.
+- What a fluent reader would actually say or write — not a textbook line.
+
+Output ONLY a JSON object on a single line, in this exact shape:
+{"definition":"...","example":"..."}`;
+  }
+  // default: en-to-zh
+  return `You are a bilingual dictionary helper. Define the English word "${word}" in 繁體中文.
+
+Rules for the "definition" field:
+- ONE short phrase only — ideally under 15 characters.
+- Plain dictionary-headword style. No examples, no etymology, no usage notes, no Pinyin.
+- If a single character or single-word translation captures it ("cat" → "貓", "happy" → "高興"), use that.
+
+Rules for the "example" field:
+- ONE natural sentence in English using the word in context.
+- What a fluent speaker would actually say or write — not a textbook line.
+
+Output ONLY a JSON object on a single line, in this exact shape:
+{"definition":"...","example":"..."}`;
+}
+
+function extractJson(text) {
+  if (!text) return null;
+  // strip code fences if Gemini wraps the JSON in ```json ... ```
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced ? fenced[1] : text).trim();
+  // find the first {...} block
+  const first = candidate.indexOf("{");
+  const last = candidate.lastIndexOf("}");
+  if (first < 0 || last <= first) return null;
+  try {
+    return JSON.parse(candidate.slice(first, last + 1));
+  } catch {
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+  if (!process.env.GEMINI_API_KEY) return send(res, 500, { error: "Server missing GEMINI_API_KEY" });
 
   let body = req.body;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
@@ -63,42 +100,47 @@ export default async function handler(req, res) {
     return send(res, 429, { error: "Too many requests. Please slow down (80 / hour)." });
   }
 
-  const url = `${ENDPOINT}?q=${encodeURIComponent(word)}&langpair=${encodeURIComponent(langpairFor(direction))}`;
+  const prompt = buildPrompt({ word, direction });
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.5,
+      maxOutputTokens: 512,
+      topP: 0.95,
+      responseMimeType: "application/json",
+    },
+  };
 
-  let upstream;
+  let geminiRes;
   try {
-    upstream = await fetch(url, { headers: { Accept: "application/json" } });
+    geminiRes = await fetch(`${ENDPOINT}?key=${process.env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   } catch (err) {
-    console.error("MyMemory fetch failed:", err.message || err);
+    console.error("Gemini fetch failed:", err);
     return send(res, 502, { error: "Definition service unreachable" });
   }
 
-  if (!upstream.ok) {
-    const errBody = await upstream.text().catch(() => "");
-    console.error("MyMemory HTTP", upstream.status, errBody.slice(0, 200));
+  if (!geminiRes.ok) {
+    const errBody = await geminiRes.text().catch(() => "");
+    console.error("Gemini error:", geminiRes.status, errBody);
     return send(res, 502, { error: "Definition service returned an error" });
   }
 
-  const data = await upstream.json().catch(() => null);
-  const translated = data?.responseData?.translatedText;
-  const responseStatus = data?.responseStatus;
+  const data = await geminiRes.json().catch(() => null);
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join("").trim();
+  const parsed = extractJson(text);
 
-  // MyMemory returns HTTP 200 even on logical errors and signals via
-  // `responseStatus`. Anything other than 200 (string or number) is a fault.
-  if (responseStatus !== undefined && responseStatus !== 200 && responseStatus !== "200") {
-    const detail = data?.responseDetails || "";
-    console.error("MyMemory logical error:", responseStatus, detail);
-    return send(res, 502, { error: "Definition could not be parsed" });
-  }
-
-  if (typeof translated !== "string" || !translated.trim()) {
-    console.error("MyMemory empty translation:", JSON.stringify(data).slice(0, 200));
+  if (!parsed || typeof parsed.definition !== "string" || typeof parsed.example !== "string") {
+    console.error("Could not parse define response:", text);
     return send(res, 502, { error: "Definition could not be parsed" });
   }
 
   return send(res, 200, {
     word,
-    definition: translated.trim(),
-    example: "",
+    definition: parsed.definition.trim(),
+    example: parsed.example.trim(),
   });
 }
