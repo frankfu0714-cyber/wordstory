@@ -239,6 +239,41 @@
     display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
   }
   .story-meta button{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+  .story-meta .save-btn{
+    color:var(--ink-quiet);text-decoration:none;
+    display:inline-flex;align-items:center;gap:5px;
+    padding:3px 8px;border-radius:6px;border:1px solid transparent;
+    font-size:13px;transition:all .15s ease;cursor:pointer;
+  }
+  .story-meta .save-btn:hover{border-color:var(--rule);color:var(--accent)}
+  .story-meta .save-btn.saved{color:var(--accent);background:var(--accent-bg)}
+  .story-meta .save-btn .heart{font-size:14px;line-height:1}
+  .saved-list{display:flex;flex-direction:column;gap:8px}
+  .saved-card{
+    background:var(--paper);border:1px solid var(--rule);border-radius:12px;
+    padding:14px 16px;box-shadow:var(--shadow);cursor:pointer;
+    transition:border-color .15s ease;
+  }
+  .saved-card:hover{border-color:var(--accent-soft)}
+  .saved-card .preview{
+    font-family:var(--serif);font-size:16px;font-weight:600;color:var(--ink);
+    line-height:1.45;margin-bottom:6px;
+  }
+  .saved-card .row{
+    display:flex;gap:6px;flex-wrap:wrap;align-items:center;
+    font-size:11px;color:var(--ink-quiet);
+  }
+  .saved-card .chip{
+    padding:2px 8px;border-radius:999px;background:var(--paper-soft);
+    color:var(--ink-soft);
+  }
+  .saved-card .chip.accent{background:var(--accent-bg);color:var(--accent)}
+  .saved-card .when{margin-left:auto}
+  .saved-card .del{
+    background:none;border:none;cursor:pointer;font-size:14px;
+    color:var(--ink-quiet);padding:2px 6px;border-radius:4px;
+  }
+  .saved-card .del:hover{color:var(--bad)}
   .story-lang-toggle{
     display:inline-flex;gap:0;margin-bottom:10px;
   }
@@ -358,6 +393,9 @@
   <button class="tab" data-view="gen" type="button">
     <span data-i18n="tabGenerator">Story</span>
   </button>
+  <button class="tab" data-view="saved" type="button">
+    <span data-i18n="tabSaved">Saved</span><span class="count" id="savedCount">0</span>
+  </button>
 </nav>
 
 <main>
@@ -422,6 +460,14 @@
     </div>
 
     <div id="storyArea"></div>
+  </section>
+
+  <!-- ============ SAVED VIEW ============ -->
+  <section class="view" id="view-saved">
+    <div class="saved-list" id="savedList"></div>
+    <div class="empty" id="savedEmpty" style="display:none">
+      <span data-i18n="savedEmpty">No saved stories yet. Tap the heart on a generated story to keep it.</span>
+    </div>
   </section>
 </main>
 
@@ -488,6 +534,12 @@ const STRINGS = {
     generating: "Writing…",
     storyMetaWords: "{n} words woven in",
     regenerate: "Regenerate",
+    save: "Save",
+    unsave: "Saved",
+    tabSaved: "Saved",
+    savedEmpty: "No saved stories yet. Tap the heart on a generated story to keep it.",
+    savedToast: "Saved to your library",
+    unsavedToast: "Removed from saves",
     close: "Close",
     fetchingDef: "Looking up…",
     defFailed: "Couldn't fetch definition — tap to retry",
@@ -548,6 +600,12 @@ const STRINGS = {
     generating: "撰寫中…",
     storyMetaWords: "已織入 {n} 個詞彙",
     regenerate: "重新生成",
+    save: "儲存",
+    unsave: "已儲存",
+    tabSaved: "已儲存",
+    savedEmpty: "還沒有收藏的故事。產生故事後點愛心即可儲存。",
+    savedToast: "已加入收藏",
+    unsavedToast: "已從收藏移除",
     close: "關閉",
     fetchingDef: "查詢中…",
     defFailed: "查詢失敗 — 點此重試",
@@ -586,6 +644,7 @@ const STYLES = ["short_story","news_article","dialogue","letter","poem","custom"
 
 /* ---- state ---- */
 const LS_WORDS = "wordstory.words";
+const LS_SAVED = "wordstory.saved_stories";
 const LS_LANG = "wordstory.lang";
 const LS_DIR = "wordstory.direction";
 
@@ -1109,11 +1168,27 @@ function renderStory(){
   meta.className = "story-meta";
   const wleft = document.createElement("span");
   wleft.textContent = t("storyMetaWords", { n: lastStory.vocab.length });
+  const right = document.createElement("span");
+  right.style.cssText = "display:inline-flex;gap:10px;align-items:center";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  const refreshSaveLabel = () => {
+    const saved = isCurrentStorySaved();
+    saveBtn.className = "save-btn" + (saved ? " saved" : "");
+    saveBtn.innerHTML = `<span class="heart">${saved ? "♥" : "♡"}</span>${saved ? t("unsave") : t("save")}`;
+  };
+  saveBtn.addEventListener("click", () => {
+    toggleSaveCurrent();
+    refreshSaveLabel();
+    renderSavedList();
+  });
+  refreshSaveLabel();
   const wright = document.createElement("button");
   wright.type = "button";
   wright.textContent = t("regenerate");
   wright.addEventListener("click", () => generateStory());
-  meta.append(wleft, wright);
+  right.append(saveBtn, wright);
+  meta.append(wleft, right);
   area.appendChild(meta);
 
   // mark click handlers (covers both English and Chinese marks)
@@ -1221,12 +1296,120 @@ function toast(msg, bad){
 }
 
 /* ---- view switching ---- */
+/* ---- saved stories (localStorage) ---- */
+function loadSaved(){
+  try { return JSON.parse(localStorage.getItem(LS_SAVED) || "[]"); }
+  catch { return []; }
+}
+function saveAll(arr){
+  try { localStorage.setItem(LS_SAVED, JSON.stringify(arr)); }
+  catch(e){ console.warn("[wordstory] saved-stories write failed", e); }
+}
+function currentSentencesKey(){
+  if (!lastStory || !Array.isArray(lastStory.sentences) || lastStory.sentences.length === 0) return null;
+  return JSON.stringify(lastStory.sentences.map(p => ({ en: p.en || "", zh: p.zh || "" })));
+}
+function isCurrentStorySaved(){
+  const k = currentSentencesKey();
+  if (!k) return false;
+  return loadSaved().some(s => s.key === k);
+}
+function toggleSaveCurrent(){
+  const k = currentSentencesKey();
+  if (!k) return;
+  const list = loadSaved();
+  const i = list.findIndex(s => s.key === k);
+  if (i >= 0) {
+    list.splice(i, 1);
+    saveAll(list);
+    toast(t("unsavedToast"));
+  } else {
+    const preview = (lastStory.story_en || (lastStory.sentences[0] && lastStory.sentences[0].en) || "").slice(0, 40).trim();
+    list.unshift({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+      key: k,
+      date: Date.now(),
+      style: selectedStyle,
+      direction,
+      sentences: lastStory.sentences,
+      story_en: lastStory.story_en || "",
+      story_zh: lastStory.story_zh || "",
+      vocabIDs: lastStory.vocab.map(v => v.id),
+      preview,
+    });
+    saveAll(list);
+    toast(t("savedToast"));
+  }
+  updateSavedCount();
+}
+function updateSavedCount(){
+  const c = document.getElementById("savedCount");
+  if (c) c.textContent = String(loadSaved().length);
+}
+function renderSavedList(){
+  const list = loadSaved();
+  const container = document.getElementById("savedList");
+  const empty = document.getElementById("savedEmpty");
+  if (!container) return;
+  container.innerHTML = "";
+  if (list.length === 0) { if (empty) empty.style.display = "block"; updateSavedCount(); return; }
+  if (empty) empty.style.display = "none";
+  for (const s of list) {
+    const card = document.createElement("div");
+    card.className = "saved-card";
+    const preview = document.createElement("div");
+    preview.className = "preview";
+    preview.textContent = (s.preview || "—") + "…";
+    const row = document.createElement("div");
+    row.className = "row";
+    const styleChip = document.createElement("span");
+    styleChip.className = "chip accent";
+    styleChip.textContent = (STRINGS[lang] && STRINGS[lang]["style_" + s.style]) || s.style;
+    const dirChip = document.createElement("span");
+    dirChip.className = "chip";
+    dirChip.textContent = s.direction === "zh-to-en" ? "繁體中文 → English" : "English → 繁體中文";
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = new Date(s.date).toLocaleDateString();
+    const del = document.createElement("button");
+    del.className = "del";
+    del.type = "button";
+    del.textContent = "×";
+    del.title = "Delete";
+    del.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const next = loadSaved().filter(x => x.id !== s.id);
+      saveAll(next);
+      renderSavedList();
+    });
+    row.append(styleChip, dirChip, when, del);
+    card.append(preview, row);
+    card.addEventListener("click", () => openSavedStory(s));
+    container.appendChild(card);
+  }
+  updateSavedCount();
+}
+function openSavedStory(s){
+  // Resolve vocab from the current Words list so highlights still work.
+  const vocab = (s.vocabIDs || []).map(id => words.find(w => w.id === id)).filter(Boolean);
+  lastStory = {
+    sentences: Array.isArray(s.sentences) ? s.sentences : [],
+    story_en: s.story_en || "",
+    story_zh: s.story_zh || "",
+    vocab,
+    showChinese: false,
+  };
+  setView("gen");
+  renderStory();
+}
+
 function setView(v){
   currentView = v;
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
   window.scrollTo({ top: 0, behavior: "instant" });
   if (v === "gen") renderChips();
+  if (v === "saved") renderSavedList();
 }
 
 /* ---- wiring ---- */
@@ -1301,6 +1484,7 @@ function init(){
   renderWords();
   renderChips();
   updateGenerateBtn();
+  updateSavedCount();
 }
 
 init();
