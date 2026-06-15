@@ -241,17 +241,46 @@
   .story-meta button{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
   .story-lang-toggle{
     display:inline-flex;gap:0;margin-bottom:10px;
-    background:var(--paper-soft);border:1px solid var(--rule);border-radius:8px;
-    padding:2px;
   }
   .lang-pill{
-    cursor:pointer;border:none;background:transparent;color:var(--ink-soft);
-    font-size:12px;font-weight:600;letter-spacing:.4px;
-    padding:5px 14px;border-radius:6px;
+    cursor:pointer;
+    background:rgba(157,77,62,0.10);color:var(--accent);
+    border:1px solid rgba(157,77,62,0.35);
+    font-size:13px;font-weight:600;letter-spacing:.2px;
+    padding:6px 14px;border-radius:999px;
     transition:all .15s ease;
+    display:inline-flex;align-items:center;gap:6px;
   }
-  .lang-pill:hover{color:var(--ink)}
+  .lang-pill:hover{background:rgba(157,77,62,0.18)}
   .lang-pill.sel{background:var(--accent);color:#fff}
+  .sentence-pair{margin-bottom:14px}
+  .sentence-pair:last-child{margin-bottom:0}
+  .sentence-pair .en{
+    margin:0;font-size:18px;line-height:1.6;color:var(--ink);
+    font-family:var(--serif);
+  }
+  .sentence-pair .zh{
+    margin:4px 0 0 0;font-size:14px;line-height:1.55;color:var(--ink-soft);
+  }
+  .sentence-pair .zh mark{
+    background:var(--accent-bg);color:var(--accent);
+    padding:0 2px;border-radius:3px;
+    text-decoration:underline;text-decoration-color:var(--accent-soft);
+    text-underline-offset:3px;text-decoration-thickness:1.5px;
+    cursor:pointer;font-weight:500;
+  }
+  .story-output-zh{
+    margin-top:14px;font-size:14px;line-height:1.65;color:var(--ink-soft);
+    border-top:1px solid var(--rule);padding-top:14px;
+  }
+  .story-output-zh p{margin-bottom:.8em}
+  .story-output-zh p:last-child{margin-bottom:0}
+  .story-output-zh mark{
+    background:var(--accent-bg);color:var(--accent);
+    padding:0 2px;border-radius:3px;
+    text-decoration:underline;text-decoration-color:var(--accent-soft);
+    text-underline-offset:3px;cursor:pointer;
+  }
 
   /* ---- definition popup ---- */
   .pop-backdrop{
@@ -994,10 +1023,17 @@ async function generateStory(){
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || t("genFailed"));
-    // /api/generate now returns both languages so the user can toggle.
-    // Default the visible language to the target side (the one with vocab).
-    const defaultLang = direction === "en-to-zh" ? "en" : "zh";
-    lastStory = { en: data.story_en, zh: data.story_zh, vocab, lang: defaultLang };
+    // /api/generate now returns a sentences[] array of {en, zh} pairs plus
+    // the legacy flat story_en / story_zh fields. The UI defaults to
+    // English-only; tapping "Show Chinese" interleaves the Chinese line
+    // directly under each English sentence.
+    lastStory = {
+      sentences: Array.isArray(data.sentences) ? data.sentences : [],
+      story_en: data.story_en || "",
+      story_zh: data.story_zh || "",
+      vocab,
+      showChinese: false,
+    };
     renderStory();
   } catch (e) {
     console.error(e);
@@ -1013,35 +1049,59 @@ function renderStory(){
   const area = $("storyArea");
   area.innerHTML = "";
 
-  // EN / 中 toggle. Two pills above the story body. Vocab highlights only
-  // apply when the English version is shown — the Chinese rendering is a
-  // plain reading reference.
-  const toggle = document.createElement("div");
-  toggle.className = "story-lang-toggle";
-  for (const lang of ["en", "zh"]) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "lang-pill" + (lastStory.lang === lang ? " sel" : "");
-    btn.textContent = lang === "en" ? "EN" : "中";
-    btn.addEventListener("click", () => {
-      if (lastStory.lang === lang) return;
-      lastStory.lang = lang;
-      renderStory();
-    });
-    toggle.appendChild(btn);
-  }
-  area.appendChild(toggle);
+  // Show / Hide Chinese button (replaces the previous EN / 中 toggle). When
+  // off, the story renders as English-only with vocab highlights. When on,
+  // each English sentence has its Chinese translation directly below it.
+  const ctrl = document.createElement("div");
+  ctrl.className = "story-lang-toggle";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "lang-pill" + (lastStory.showChinese ? " sel" : "");
+  btn.textContent = lastStory.showChinese
+    ? (lang === "zh" ? "隱藏中文" : "Hide Chinese")
+    : (lang === "zh" ? "顯示中文" : "Show Chinese");
+  btn.addEventListener("click", () => {
+    lastStory.showChinese = !lastStory.showChinese;
+    renderStory();
+  });
+  ctrl.appendChild(btn);
+  area.appendChild(ctrl);
 
   const inner = document.createElement("div");
   inner.className = "story-output";
-  const activeText = lastStory.lang === "en" ? lastStory.en : lastStory.zh;
-  if (lastStory.lang === "en") {
-    inner.innerHTML = highlightStory(activeText, lastStory.vocab);
+
+  if (lastStory.sentences && lastStory.sentences.length > 0) {
+    // Primary path: per-sentence pair blocks.
+    for (const pair of lastStory.sentences) {
+      const block = document.createElement("div");
+      block.className = "sentence-pair";
+      const enP = document.createElement("p");
+      enP.className = "en";
+      enP.innerHTML = highlightStoryInline(pair.en || "", lastStory.vocab);
+      block.appendChild(enP);
+      if (lastStory.showChinese) {
+        const zhP = document.createElement("p");
+        zhP.className = "zh";
+        zhP.innerHTML = highlightChinese(pair.zh || "", lastStory.vocab);
+        block.appendChild(zhP);
+      }
+      inner.appendChild(block);
+    }
   } else {
-    // Chinese: plain text, paragraph-aware (blank lines → <p>, single \n → <br>).
-    inner.innerHTML = activeText.split(/\n{2,}/).map(block =>
-      "<p>" + block.split(/\n/).map(line => line.trim()).filter(Boolean).join("<br>") + "</p>"
-    ).join("");
+    // Fallback when sentences[] is missing — render the flat story_en first,
+    // then the flat story_zh below if the user has Show Chinese on.
+    const enBlock = document.createElement("div");
+    enBlock.className = "story-output-en";
+    enBlock.innerHTML = highlightStory(lastStory.story_en || "", lastStory.vocab);
+    inner.appendChild(enBlock);
+    if (lastStory.showChinese && lastStory.story_zh) {
+      const zhBlock = document.createElement("div");
+      zhBlock.className = "story-output-zh";
+      zhBlock.innerHTML = highlightChinese(lastStory.story_zh, lastStory.vocab).split(/\n{2,}/).map(block =>
+        "<p>" + block.split(/\n/).map(line => line.trim()).filter(Boolean).join("<br>") + "</p>"
+      ).join("");
+      inner.appendChild(zhBlock);
+    }
   }
   area.appendChild(inner);
 
@@ -1056,7 +1116,7 @@ function renderStory(){
   meta.append(wleft, wright);
   area.appendChild(meta);
 
-  // mark click handlers
+  // mark click handlers (covers both English and Chinese marks)
   inner.querySelectorAll("mark").forEach(m => {
     m.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -1065,6 +1125,79 @@ function renderStory(){
       if (w) openPopup(w);
     });
   });
+}
+
+/// Single-sentence English highlighter — same algorithm as highlightStory
+/// but without the trailing paragraph wrapping (so we control the <p> from
+/// the caller).
+function highlightStoryInline(text, vocab) {
+  const wrapped = highlightStory(text, vocab);
+  // highlightStory wraps in <p>…</p>; unwrap because we're already in our
+  // own .en paragraph. Strip the outer wrapping cleanly.
+  return wrapped
+    .replace(/^<p>/, "")
+    .replace(/<\/p>$/, "")
+    .replace(/<\/p><p>/g, "<br>");
+}
+
+/// Chinese vocab highlighter. For each vocab word, extracts short Chinese
+/// candidate phrases from word.definition (after stripping POS markers and
+/// splitting on common delimiters), then substring-matches each in `text`.
+/// Longest candidates win. Each highlight is wrapped in <mark data-id="...">
+/// so the same click handler opens the same definition popup.
+function highlightChinese(text, vocab) {
+  let html = escapeHtml(text);
+  const OPEN = "", SEP = "", CLOSE = "";
+  // Build (candidate, word.id) tuples sorted longest-first.
+  const lookups = [];
+  for (const w of vocab) {
+    for (const cand of chineseCandidatesFor(w)) lookups.push({ cand, id: w.id });
+  }
+  lookups.sort((a, b) => b.cand.length - a.cand.length);
+  // Walk segments outside existing wraps so a shorter match can't nest
+  // inside a longer one.
+  const splitRe = new RegExp(OPEN + "[^" + CLOSE + "]*" + CLOSE, "g");
+  for (const { cand, id } of lookups) {
+    const escaped = escapeRegex(escapeHtml(cand));
+    const re = new RegExp(escaped, "g");
+    const parts = [];
+    let lastIdx = 0;
+    let m;
+    while ((m = splitRe.exec(html)) !== null) {
+      parts.push(html.slice(lastIdx, m.index));
+      parts.push(m[0]);
+      lastIdx = splitRe.lastIndex;
+    }
+    parts.push(html.slice(lastIdx));
+    for (let i = 0; i < parts.length; i += 2) {
+      parts[i] = parts[i].replace(re, (match) => OPEN + id + SEP + match + CLOSE);
+    }
+    html = parts.join("");
+    splitRe.lastIndex = 0;
+  }
+  return html.replace(
+    new RegExp(OPEN + "([^" + SEP + "]+)" + SEP + "([^" + CLOSE + "]+)" + CLOSE, "g"),
+    (_, id, txt) => `<mark data-id="${id}">${txt}</mark>`
+  );
+}
+
+function chineseCandidatesFor(word) {
+  const def = (word && word.definition) ? word.definition : "";
+  if (!def) return [];
+  const out = new Set();
+  for (const line of def.split(/\n+/)) {
+    // Strip leading POS markers like "n. ", "vt. ", "[計] ", etc.
+    const stripped = line.replace(/^(?:[a-zA-Z]+\.|\[[^\]]+\])\s*/g, "");
+    for (const raw of stripped.split(/[,;、，；/／]+/)) {
+      const s = raw.trim();
+      // Short CJK-bearing segments only — long explanatory phrases rarely
+      // appear verbatim in narrative prose.
+      if (s.length >= 1 && s.length <= 8 && /[㐀-鿿豈-﫿]/.test(s)) {
+        out.add(s);
+      }
+    }
+  }
+  return Array.from(out);
 }
 
 function openPopup(w){
