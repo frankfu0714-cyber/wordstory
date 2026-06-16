@@ -289,6 +289,8 @@
     font-size:11px;font-weight:600;padding:3px 9px;
   }
   .saved-card .chip.retry:hover{filter:brightness(1.08)}
+  .saved-card .del.edit-title{font-size:13px;color:var(--ink-quiet)}
+  .saved-card .del.edit-title:hover{color:var(--accent)}
   .story-lang-toggle{
     display:inline-flex;gap:0;margin-bottom:10px;
   }
@@ -416,15 +418,6 @@
 <main>
   <!-- ============ WORDS VIEW ============ -->
   <section class="view active" id="view-words">
-    <div class="direction-bar">
-      <span class="lbl" data-i18n="learning">I'm learning</span>
-      <button class="swap-btn" id="directionBtn" type="button">
-        <span id="directionLeft">English</span>
-        <span class="arrow">→</span>
-        <span id="directionRight">繁體中文</span>
-      </button>
-    </div>
-
     <div class="add-wrap">
       <input type="text" class="field" id="addInput" data-i18n-ph="addPlaceholder"
              autocomplete="off" autocorrect="off" spellcheck="false" />
@@ -558,6 +551,9 @@ const STRINGS = {
     savedGenerating: "Generating…",
     savedFailed: "Generation failed",
     savedRetry: "Retry",
+    storyToastGenerating: "Generating story — you'll find it in the Saved tab",
+    savedTitleEdit: "Edit title",
+    savedTitlePrompt: "Story title",
     close: "Close",
     fetchingDef: "Looking up…",
     defFailed: "Couldn't fetch definition — tap to retry",
@@ -627,6 +623,9 @@ const STRINGS = {
     savedGenerating: "正在產生…",
     savedFailed: "產生失敗",
     savedRetry: "重試",
+    storyToastGenerating: "正在產生故事 — 可在「已儲存」分頁查看",
+    savedTitleEdit: "編輯標題",
+    savedTitlePrompt: "故事標題",
     close: "關閉",
     fetchingDef: "查詢中…",
     defFailed: "查詢失敗 — 點此重試",
@@ -667,10 +666,12 @@ const STYLES = ["short_story","news_article","dialogue","letter","poem","custom"
 const LS_WORDS = "wordstory.words";
 const LS_SAVED = "wordstory.saved_stories";
 const LS_LANG = "wordstory.lang";
-const LS_DIR = "wordstory.direction";
+// App is English-learner only; direction is fixed to en-to-zh now that
+// the Settings toggle is gone. Kept as a top-level const so all existing
+// fetch-body callsites continue to read `direction` without churn.
+const direction = "en-to-zh";
 
 let lang = loadLang();
-let direction = loadDirection();
 let words = loadWords();
 let selectedIds = new Set();
 let selectedStyle = "short_story";
@@ -682,11 +683,6 @@ function loadLang(){
   const v = localStorage.getItem(LS_LANG);
   if (v === "en" || v === "zh") return v;
   return (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
-}
-function loadDirection(){
-  const v = localStorage.getItem(LS_DIR);
-  if (v === "en-to-zh" || v === "zh-to-en") return v;
-  return "en-to-zh";
 }
 function loadWords(){
   try { return JSON.parse(localStorage.getItem(LS_WORDS) || "[]"); }
@@ -719,23 +715,10 @@ function applyI18n(){
     if (key) el.placeholder = t(key).replace(/\\n/g, "\n");
   });
   $("langBtn").textContent = lang === "zh" ? "EN" : "中文";
-  renderDirection();
   renderStyleGrid();
   renderWords();
   renderChips();
   updateGenerateBtn();
-}
-
-function renderDirection(){
-  // direction = the TARGET language → the NATIVE language
-  // en-to-zh: target=English, native=繁體中文 → bar reads "English → 繁體中文"
-  if (direction === "en-to-zh") {
-    $("directionLeft").textContent = "English";
-    $("directionRight").textContent = "繁體中文";
-  } else {
-    $("directionLeft").textContent = "繁體中文";
-    $("directionRight").textContent = "English";
-  }
 }
 
 function renderStyleGrid(){
@@ -1117,7 +1100,7 @@ async function generateStory(){
   });
   saveAll(list);
   updateSavedCount();
-  toast(t("savedGenerating"));
+  toast(t("storyToastGenerating"));
   setView("saved");
 
   runGeneration({
@@ -1448,7 +1431,10 @@ function renderSavedList(){
     } else if (s.generationFailed) {
       preview.textContent = "⚠ " + t("savedFailed");
     } else {
-      preview.textContent = (s.preview || "—") + "…";
+      // Prefer the user-set custom title; fall back to the auto preview
+      // (which gets the "…" ellipsis since it's truncated).
+      const custom = (s.customTitle || "").trim();
+      preview.textContent = custom ? custom : ((s.preview || "—") + "…");
     }
 
     const row = document.createElement("div");
@@ -1462,6 +1448,21 @@ function renderSavedList(){
     const when = document.createElement("span");
     when.className = "when";
     when.textContent = new Date(s.date).toLocaleDateString();
+    // Pencil — edits the user-set title. Hidden while the row is still
+    // generating; failed rows can also be retitled, but it's most useful
+    // for completed stories.
+    let editBtn = null;
+    if (!s.isGenerating) {
+      editBtn = document.createElement("button");
+      editBtn.className = "del edit-title";
+      editBtn.type = "button";
+      editBtn.textContent = "✎";
+      editBtn.title = t("savedTitleEdit");
+      editBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        promptRenameSaved(s);
+      });
+    }
     const del = document.createElement("button");
     del.className = "del";
     del.type = "button";
@@ -1473,7 +1474,8 @@ function renderSavedList(){
       saveAll(next);
       renderSavedList();
     });
-    row.append(styleChip, dirChip, when, del);
+    if (editBtn) row.append(styleChip, dirChip, when, editBtn, del);
+    else row.append(styleChip, dirChip, when, del);
 
     // Failed rows get an inline Retry button before the delete X.
     if (s.generationFailed) {
@@ -1516,6 +1518,17 @@ function renderSavedList(){
     container.appendChild(card);
   }
   updateSavedCount();
+}
+
+/// Prompt the user for a new title on a saved story. Empty / blank input
+/// clears any existing custom title so the auto preview takes over again.
+function promptRenameSaved(s) {
+  const current = (s.customTitle && s.customTitle.trim()) || s.preview || "";
+  const next = window.prompt(t("savedTitlePrompt"), current);
+  if (next === null) return;
+  const trimmed = next.trim();
+  updateSavedEntry(s.id, { customTitle: trimmed.length > 0 ? trimmed : null });
+  renderSavedList();
 }
 
 /// Reset a failed entry to in-flight and re-run the same generation.
@@ -1570,11 +1583,6 @@ function init(){
     lang = lang === "en" ? "zh" : "en";
     localStorage.setItem(LS_LANG, lang);
     applyI18n();
-  });
-  $("directionBtn").addEventListener("click", () => {
-    direction = direction === "en-to-zh" ? "zh-to-en" : "en-to-zh";
-    localStorage.setItem(LS_DIR, direction);
-    renderDirection();
   });
   document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
 
