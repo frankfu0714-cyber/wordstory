@@ -274,6 +274,21 @@
     color:var(--ink-quiet);padding:2px 6px;border-radius:4px;
   }
   .saved-card .del:hover{color:var(--bad)}
+  .saved-card.generating .preview{color:var(--ink-soft);font-style:italic;font-weight:500}
+  .saved-card.failed .preview{color:var(--bad)}
+  .saved-card .vocab-line{
+    font-size:12px;color:var(--ink-quiet);margin-bottom:6px;line-height:1.4;
+  }
+  .saved-spinner{
+    display:inline-block;width:12px;height:12px;border-radius:50%;
+    border:2px solid var(--accent);border-top-color:transparent;
+    animation:spin .8s linear infinite;margin-right:8px;vertical-align:-2px;
+  }
+  .saved-card .chip.retry{
+    background:var(--accent);color:#fff;border:none;cursor:pointer;
+    font-size:11px;font-weight:600;padding:3px 9px;
+  }
+  .saved-card .chip.retry:hover{filter:brightness(1.08)}
   .story-lang-toggle{
     display:inline-flex;gap:0;margin-bottom:10px;
   }
@@ -540,6 +555,9 @@ const STRINGS = {
     savedEmpty: "No saved stories yet. Tap the heart on a generated story to keep it.",
     savedToast: "Saved to your library",
     unsavedToast: "Removed from saves",
+    savedGenerating: "Generating…",
+    savedFailed: "Generation failed",
+    savedRetry: "Retry",
     close: "Close",
     fetchingDef: "Looking up…",
     defFailed: "Couldn't fetch definition — tap to retry",
@@ -606,6 +624,9 @@ const STRINGS = {
     savedEmpty: "還沒有收藏的故事。產生故事後點愛心即可儲存。",
     savedToast: "已加入收藏",
     unsavedToast: "已從收藏移除",
+    savedGenerating: "正在產生…",
+    savedFailed: "產生失敗",
+    savedRetry: "重試",
     close: "關閉",
     fetchingDef: "查詢中…",
     defFailed: "查詢失敗 — 點此重試",
@@ -1013,11 +1034,19 @@ function highlightStory(story, vocab){
   let html = escapeHtml(story);
 
   // Build matchers, longest first so "self-esteem" wins over "self".
+  // For multi-word vocab (e.g. "look forward to"), per-token inflection is
+  // applied so the regex also catches "looked forward to" / "looking forward
+  // to" — each token gets up to 4 trailing letters, same budget the
+  // single-word matcher uses.
   const matchers = vocab.slice().sort((a,b) => b.word.length - a.word.length).map(w => {
-    const escaped = escapeRegex(escapeHtml(w.word));
-    const re = containsCJK(w.word)
-      ? new RegExp(escaped, "g")
-      : new RegExp("\\b" + escaped + "(?:[a-zA-Z]{0,4})?\\b", "gi");
+    let re;
+    if (containsCJK(w.word)) {
+      re = new RegExp(escapeRegex(escapeHtml(w.word)), "g");
+    } else {
+      const tokens = w.word.trim().split(/\s+/).filter(Boolean);
+      const parts = tokens.map(t => escapeRegex(escapeHtml(t)) + "(?:[a-zA-Z]{0,4})?");
+      re = new RegExp("\\b" + parts.join("\\s+") + "\\b", "gi");
+    }
     return { w, re };
   });
 
@@ -1055,6 +1084,11 @@ function highlightStory(story, vocab){
   return paragraphs;
 }
 
+/// Auto-save + parallel generation: inserts a placeholder saved entry with
+/// isGenerating=true, switches to the Saved tab so the in-progress row is
+/// visible, then fires the request in the background. On resolve, hydrates
+/// the same entry. The user can immediately tweak selection and kick off
+/// another generation while this one runs.
 async function generateStory(){
   if (selectedIds.size === 0) { toast(t("selectAtLeastOne"), true); return; }
   const vocab = words.filter(w => selectedIds.has(w.id));
@@ -1062,45 +1096,84 @@ async function generateStory(){
     toast(t("customNeedsPrompt"), true); return;
   }
 
-  const btn = $("generateBtn");
-  const span = btn.querySelector("span");
-  const original = span.textContent;
-  btn.disabled = true;
-  span.textContent = t("generating");
-  $("storyArea").innerHTML = "";
+  const customPromptValue = $("customPrompt").value.trim();
+  const placeholderId = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+  const list = loadSaved();
+  list.unshift({
+    id: placeholderId,
+    key: "pending:" + placeholderId,
+    date: Date.now(),
+    style: selectedStyle,
+    direction,
+    sentences: [],
+    story_en: "",
+    story_zh: "",
+    vocabIDs: vocab.map(v => v.id),
+    customPrompt: customPromptValue,
+    preview: "",
+    isGenerating: true,
+    generationFailed: false,
+    generationFailureReason: null,
+  });
+  saveAll(list);
+  updateSavedCount();
+  toast(t("savedGenerating"));
+  setView("saved");
 
+  runGeneration({
+    id: placeholderId,
+    vocab,
+    style: selectedStyle,
+    customPrompt: customPromptValue,
+    direction,
+  });
+}
+
+async function runGeneration({ id, vocab, style, customPrompt, direction }) {
   try {
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         words: vocab.map(w => ({ word: w.word })),
-        style: selectedStyle,
-        customPrompt: $("customPrompt").value.trim(),
+        style,
+        customPrompt,
         direction,
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || t("genFailed"));
-    // /api/generate now returns a sentences[] array of {en, zh} pairs plus
-    // the legacy flat story_en / story_zh fields. The UI defaults to
-    // English-only; tapping "Show Chinese" interleaves the Chinese line
-    // directly under each English sentence.
-    lastStory = {
-      sentences: Array.isArray(data.sentences) ? data.sentences : [],
-      story_en: data.story_en || "",
-      story_zh: data.story_zh || "",
-      vocab,
-      showChinese: false,
-    };
-    renderStory();
+    const sentences = Array.isArray(data.sentences) ? data.sentences : [];
+    const story_en = data.story_en || "";
+    const story_zh = data.story_zh || "";
+    const preview = (story_en || (sentences[0] && sentences[0].en) || "").slice(0, 40).trim();
+    const key = sentences.length > 0
+      ? JSON.stringify(sentences.map(p => ({ en: p.en || "", zh: p.zh || "" })))
+      : "flat:" + story_en + "|" + story_zh;
+    updateSavedEntry(id, {
+      sentences, story_en, story_zh, preview, key,
+      isGenerating: false, generationFailed: false, generationFailureReason: null,
+    });
   } catch (e) {
-    console.error(e);
-    toast(e.message || t("genFailed"), true);
-  } finally {
-    btn.disabled = selectedIds.size === 0;
-    span.textContent = t("generateBtn");
+    console.error("[wordstory] generation failed", e);
+    updateSavedEntry(id, {
+      isGenerating: false,
+      generationFailed: true,
+      generationFailureReason: e && e.message ? e.message : t("genFailed"),
+    });
   }
+}
+
+/// Patch a saved entry in localStorage by id with the given fields, then
+/// re-render the Saved list if it's currently visible.
+function updateSavedEntry(id, patch) {
+  const list = loadSaved();
+  const idx = list.findIndex(s => s.id === id);
+  if (idx < 0) return;
+  list[idx] = Object.assign({}, list[idx], patch);
+  saveAll(list);
+  if (currentView === "saved") renderSavedList();
+  updateSavedCount();
 }
 
 function renderStory(){
@@ -1171,27 +1244,14 @@ function renderStory(){
   meta.className = "story-meta";
   const wleft = document.createElement("span");
   wleft.textContent = t("storyMetaWords", { n: lastStory.vocab.length });
-  const right = document.createElement("span");
-  right.style.cssText = "display:inline-flex;gap:10px;align-items:center";
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  const refreshSaveLabel = () => {
-    const saved = isCurrentStorySaved();
-    saveBtn.className = "save-btn" + (saved ? " saved" : "");
-    saveBtn.innerHTML = `<span class="heart">${saved ? "♥" : "♡"}</span>${saved ? t("unsave") : t("save")}`;
-  };
-  saveBtn.addEventListener("click", () => {
-    toggleSaveCurrent();
-    refreshSaveLabel();
-    renderSavedList();
-  });
-  refreshSaveLabel();
+  // Heart removed — every generation is auto-saved, so a manual save is
+  // redundant. The Regenerate button reuses the current selection to fire a
+  // brand-new generation (which lands as its own entry in the Saved list).
   const wright = document.createElement("button");
   wright.type = "button";
   wright.textContent = t("regenerate");
   wright.addEventListener("click", () => generateStory());
-  right.append(saveBtn, wright);
-  meta.append(wleft, right);
+  meta.append(wleft, wright);
   area.appendChild(meta);
 
   // mark click handlers (covers both English and Chinese marks)
@@ -1368,12 +1428,29 @@ function renderSavedList(){
   container.innerHTML = "";
   if (list.length === 0) { if (empty) empty.style.display = "block"; updateSavedCount(); return; }
   if (empty) empty.style.display = "none";
-  for (const s of list) {
+
+  // Generating rows pin to the top; everything else by recency.
+  const sorted = list.slice().sort((a, b) => {
+    if (!!a.isGenerating !== !!b.isGenerating) return a.isGenerating ? -1 : 1;
+    return (b.date || 0) - (a.date || 0);
+  });
+
+  for (const s of sorted) {
     const card = document.createElement("div");
     card.className = "saved-card";
+    if (s.isGenerating) card.className += " generating";
+    if (s.generationFailed) card.className += " failed";
+
     const preview = document.createElement("div");
     preview.className = "preview";
-    preview.textContent = (s.preview || "—") + "…";
+    if (s.isGenerating) {
+      preview.innerHTML = `<span class="saved-spinner"></span>${escapeHtml(t("savedGenerating"))}`;
+    } else if (s.generationFailed) {
+      preview.textContent = "⚠ " + t("savedFailed");
+    } else {
+      preview.textContent = (s.preview || "—") + "…";
+    }
+
     const row = document.createElement("div");
     row.className = "row";
     const styleChip = document.createElement("span");
@@ -1397,11 +1474,69 @@ function renderSavedList(){
       renderSavedList();
     });
     row.append(styleChip, dirChip, when, del);
-    card.append(preview, row);
-    card.addEventListener("click", () => openSavedStory(s));
+
+    // Failed rows get an inline Retry button before the delete X.
+    if (s.generationFailed) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "chip retry";
+      retry.textContent = t("savedRetry");
+      retry.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        retrySavedEntry(s);
+      });
+      row.insertBefore(retry, when);
+    }
+
+    // Show vocab preview for in-progress so user can see what's brewing.
+    if (s.isGenerating) {
+      const vocabLine = document.createElement("div");
+      vocabLine.className = "vocab-line";
+      const items = (s.vocabIDs || []).map(id => {
+        const w = words.find(x => x.id === id);
+        return w ? w.word : null;
+      }).filter(Boolean).slice(0, 6);
+      vocabLine.textContent = items.join(" · ");
+      card.append(preview, vocabLine, row);
+    } else {
+      card.append(preview, row);
+    }
+
+    card.addEventListener("click", () => {
+      if (s.isGenerating) {
+        toast(t("savedGenerating"));
+        return;
+      }
+      if (s.generationFailed) {
+        toast(s.generationFailureReason || t("savedFailed"), true);
+        return;
+      }
+      openSavedStory(s);
+    });
     container.appendChild(card);
   }
   updateSavedCount();
+}
+
+/// Reset a failed entry to in-flight and re-run the same generation.
+function retrySavedEntry(s) {
+  const vocab = (s.vocabIDs || []).map(id => words.find(w => w.id === id)).filter(Boolean);
+  if (vocab.length === 0) {
+    toast(t("savedFailed"), true);
+    return;
+  }
+  updateSavedEntry(s.id, {
+    isGenerating: true,
+    generationFailed: false,
+    generationFailureReason: null,
+  });
+  runGeneration({
+    id: s.id,
+    vocab,
+    style: s.style,
+    customPrompt: s.customPrompt || "",
+    direction: s.direction,
+  });
 }
 function openSavedStory(s){
   // Resolve vocab from the current Words list so highlights still work.
