@@ -1141,7 +1141,10 @@ function renderStory(){
       if (lastStory.showChinese) {
         const zhP = document.createElement("p");
         zhP.className = "zh";
-        zhP.innerHTML = highlightChinese(pair.zh || "", lastStory.vocab);
+        // Prefer Gemini's per-sentence vocab_spans for exact-span highlights;
+        // highlightChinese falls back to dictionary-substring search when the
+        // map is absent or omits a given vocab word.
+        zhP.innerHTML = highlightChinese(pair.zh || "", lastStory.vocab, pair.vocab_spans);
         block.appendChild(zhP);
       }
       inner.appendChild(block);
@@ -1220,13 +1223,24 @@ function highlightStoryInline(text, vocab) {
 /// splitting on common delimiters), then substring-matches each in `text`.
 /// Longest candidates win. Each highlight is wrapped in <mark data-id="...">
 /// so the same click handler opens the same definition popup.
-function highlightChinese(text, vocab) {
+function highlightChinese(text, vocab, vocabSpans) {
   let html = escapeHtml(text);
   const OPEN = "", SEP = "", CLOSE = "";
-  // Build (candidate, word.id) tuples sorted longest-first.
+  // Build (candidate, word.id) tuples. Prefer Gemini's per-sentence
+  // vocab_spans entry when present — that's the exact substring in this
+  // sentence's zh translation, so we don't risk highlighting unrelated
+  // dictionary candidates that happen to share characters. Fall back to
+  // the dictionary-derived candidates when a span is missing.
   const lookups = [];
   for (const w of vocab) {
-    for (const cand of chineseCandidatesFor(w)) lookups.push({ cand, id: w.id });
+    const key = (w.word || "").trim().toLowerCase();
+    const span = (vocabSpans && typeof vocabSpans === "object")
+      ? vocabSpans[key] : null;
+    if (typeof span === "string" && span.trim().length > 0) {
+      lookups.push({ cand: span.trim(), id: w.id });
+    } else {
+      for (const cand of chineseCandidatesFor(w)) lookups.push({ cand, id: w.id });
+    }
   }
   lookups.sort((a, b) => b.cand.length - a.cand.length);
   // Walk segments outside existing wraps so a shorter match can't nest

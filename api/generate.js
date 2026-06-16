@@ -85,19 +85,38 @@ PROCESS
 2. Break it into sentence-pair objects, ONE sentence per pair. Each pair has:
    - "en": the English sentence
    - "zh": the matching Traditional Chinese sentence
+   - "vocab_spans": an object mapping each ENGLISH vocabulary word that
+     appears in this sentence's "en" to the EXACT Chinese substring in
+     this sentence's "zh" that translates that vocabulary word.
    Regardless of primary direction, ALWAYS use the keys "en" (for the English form) and "zh" (for the Traditional Chinese form).
 3. Provide the full concatenated story in both languages for convenience as "story_en" and "story_zh".
 
-RULES
+vocab_spans RULES
+- Keys are the original vocabulary words EXACTLY as listed in the
+  VOCABULARY section above — no inflection (use "look forward" even if
+  the sentence uses "looking forward"), no capitalisation changes.
+- Values are the MINIMAL Chinese substring in "zh" that translates that
+  vocabulary word — no surrounding context, no paraphrase. The substring
+  MUST appear verbatim in "zh" (so a UI can locate-and-highlight it via
+  substring search).
+- If a vocabulary word does NOT appear in this sentence's "en", omit its
+  key entirely from vocab_spans. If no vocabulary word appears at all,
+  emit "vocab_spans": {}.
+
+SENTENCE RULES
 - Each pair must contain EXACTLY one sentence on each side — never combine two English sentences into one pair, never split one sentence across two pairs.
-- The translation must convey the same meaning, scene, and tone — not a paraphrase. The translation does not need the vocabulary words verbatim.
+- The translation must convey the same meaning, scene, and tone — not a paraphrase. The translation does not need the vocabulary words verbatim, but vocab_spans values must.
 - No preamble, no commentary, no markdown headings. Output ONLY the JSON object below.
 
 Output JSON shape:
 {
   "sentences": [
-    {"en": "<one English sentence>", "zh": "<matching Traditional Chinese sentence>"},
-    {"en": "...", "zh": "..."}
+    {
+      "en": "<one English sentence>",
+      "zh": "<matching Traditional Chinese sentence>",
+      "vocab_spans": {"<vocab word>": "<exact zh substring>"}
+    },
+    {"en": "...", "zh": "...", "vocab_spans": {}}
   ],
   "story_en": "<full English version, sentences concatenated with spaces>",
   "story_zh": "<full Traditional Chinese version, sentences concatenated>"
@@ -141,12 +160,12 @@ export default async function handler(req, res) {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.85,
-      // 5000 tokens — sentence-pair structure has more JSON overhead than the
+      // 6000 tokens — sentence-pair structure has more JSON overhead than the
       // flat dual-string response, plus we keep the full concatenated stories
-      // alongside. Previous bumps: 1200 → 2400 → 4000. 5000 has comfortably
-      // covered every smoke test so far including 12-word vocab lists and
-      // zh-to-en (where Chinese characters cost more tokens).
-      maxOutputTokens: 5000,
+      // alongside. vocab_spans per sentence adds ~10-30 tokens of structured
+      // JSON per pair, so bumped 5000 → 6000 to keep truncation headroom on
+      // longer vocab lists. Previous bumps: 1200 → 2400 → 4000 → 5000.
+      maxOutputTokens: 6000,
       topP: 0.95,
       responseMimeType: "application/json",
     },
@@ -197,10 +216,31 @@ export default async function handler(req, res) {
   }
 
   // Filter the sentences array to only well-formed {en, zh} pairs.
+  // vocab_spans is preserved when present and shaped correctly — clients
+  // use it for per-sentence Chinese vocab highlighting and gracefully fall
+  // back to dictionary-substring search when it's missing.
   const sentences = Array.isArray(parsed.sentences)
     ? parsed.sentences
         .filter(p => p && typeof p.en === "string" && typeof p.zh === "string")
-        .map(p => ({ en: p.en.trim(), zh: p.zh.trim() }))
+        .map(p => {
+          const out = { en: p.en.trim(), zh: p.zh.trim() };
+          if (p.vocab_spans && typeof p.vocab_spans === "object" && !Array.isArray(p.vocab_spans)) {
+            const spans = {};
+            for (const [k, v] of Object.entries(p.vocab_spans)) {
+              if (typeof k === "string" && typeof v === "string"
+                  && k.trim().length > 0 && v.trim().length > 0) {
+                // Normalise key to lowercase so the client can match against
+                // either the original vocab string or an inflected form
+                // without sensitivity to casing.
+                spans[k.trim().toLowerCase()] = v.trim();
+              }
+            }
+            out.vocab_spans = spans;
+          } else {
+            out.vocab_spans = {};
+          }
+          return out;
+        })
         .filter(p => p.en.length > 0 || p.zh.length > 0)
     : [];
 
