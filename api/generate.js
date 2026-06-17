@@ -52,7 +52,13 @@ const STYLE_ZH = {
   poem: "請用繁體中文寫一首 8–16 行的短詩。意象鮮明，可較自由地比喻運用所列詞彙——若隱喻更貼切，不必拘泥字面意思。",
 };
 
-function buildPrompt({ words, style, customPrompt, direction }) {
+// Brief-length override. Appended AFTER the style instruction so its tighter
+// word target wins over the style template's default count. Kept in both
+// target languages so a 繁體中文 generation gets a 繁體中文 instruction.
+const LENGTH_BRIEF_EN = "OVERRIDE LENGTH: Keep the piece BRIEF — write only 40–60 English words total, about a short paragraph. Do NOT meet any longer word target stated above. Still weave every vocabulary word in naturally.";
+const LENGTH_BRIEF_ZH = "覆寫長度：請寫得簡短——全文僅 40–60 個中文字，約一小段。不要寫到更長。仍須自然帶入每一個詞彙。";
+
+function buildPrompt({ words, style, customPrompt, direction, length }) {
   // direction tells us the TARGET language (the one the user is learning):
   //   en-to-zh  → vocab is English, primary story written in English
   //   zh-to-en  → vocab is Chinese, primary story written in 繁體中文
@@ -67,6 +73,13 @@ function buildPrompt({ words, style, customPrompt, direction }) {
   } else {
     const table = targetIsEnglish ? STYLE_EN : STYLE_ZH;
     styleInstruction = table[style] || table.short_story;
+  }
+
+  // Length override — Brief tightens the word count without disturbing the
+  // style's format/tone. Standard is the existing per-style word target.
+  if (length === "brief") {
+    const lengthOverride = targetIsEnglish ? LENGTH_BRIEF_EN : LENGTH_BRIEF_ZH;
+    styleInstruction = `${styleInstruction}\n\n${lengthOverride}`;
   }
 
   const primaryLang = targetIsEnglish ? "English" : "繁體中文 (Traditional Chinese)";
@@ -145,6 +158,9 @@ export default async function handler(req, res) {
   const customPrompt = typeof body.customPrompt === "string"
     ? body.customPrompt.slice(0, MAX_CUSTOM_CHARS)
     : "";
+  // Length: the client only sends "length" when it picked Brief — Standard
+  // is implied by omission so older clients keep working unchanged.
+  const length = body.length === "brief" ? "brief" : "standard";
 
   if (style === "custom" && !customPrompt.trim()) {
     return send(res, 400, { error: "Custom style needs a prompt" });
@@ -155,7 +171,7 @@ export default async function handler(req, res) {
     return send(res, 429, { error: "Too many requests. Please slow down (30 / hour)." });
   }
 
-  const prompt = buildPrompt({ words, style, customPrompt, direction });
+  const prompt = buildPrompt({ words, style, customPrompt, direction, length });
   const payload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
