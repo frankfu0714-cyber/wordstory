@@ -55,8 +55,14 @@ const STYLE_ZH = {
 // Brief-length override. Appended AFTER the style instruction so its tighter
 // word target wins over the style template's default count. Kept in both
 // target languages so a 繁體中文 generation gets a 繁體中文 instruction.
-const LENGTH_BRIEF_EN = "OVERRIDE LENGTH: Keep the piece BRIEF — write only 40–60 English words total, about a short paragraph. Do NOT meet any longer word target stated above. Still weave every vocabulary word in naturally.";
-const LENGTH_BRIEF_ZH = "覆寫長度：請寫得簡短——全文僅 40–60 個中文字，約一小段。不要寫到更長。仍須自然帶入每一個詞彙。";
+//
+// IMPORTANT: explicitly preserves the structured JSON output (sentences[]
+// with vocab_spans per pair, plus story_en/story_zh). Earlier wording
+// ("Do NOT meet any longer word target") was being read as "skip extras"
+// — Gemini stopped emitting vocab_spans on brief outputs, which broke
+// Chinese-side vocabulary highlighting on the client.
+const LENGTH_BRIEF_EN = "LENGTH OVERRIDE: keep the PROSE itself BRIEF — write only 40–60 English words total, about a short paragraph. Don't pad to meet any longer word target stated above. The structured JSON output (sentences[] with vocab_spans per pair, plus story_en/story_zh) is STILL REQUIRED IN FULL — emit vocab_spans for every vocabulary word that appears in each sentence's en, exactly as the rules below specify.";
+const LENGTH_BRIEF_ZH = "長度覆寫：請讓正文簡短——全文僅 40–60 個中文字，約一小段。不要為了達到上面提到的更長字數而灌水。但結構化 JSON 輸出（含 sentences[]、每對的 vocab_spans、以及 story_en/story_zh）仍須完整提供——每個句子的 vocab_spans 必須照下方規則填寫所出現的每一個詞彙。";
 
 function buildPrompt({ words, style, customPrompt, direction, length }) {
   // direction tells us the TARGET language (the one the user is learning):
